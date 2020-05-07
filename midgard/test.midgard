@@ -1,0 +1,22 @@
+import "foo"
+
+const foo = 123
+var foo int = 123
+
+const (
+	foo = 123 + 345
+	foo = 123
+)
+type foo int
+type foo = int
+
+proc foo() {
+	var x int = 123
+	proc name () {
+	}
+	type Foo struct {
+		x i32
+		y f32
+		z, w, a bool
+	}
+}

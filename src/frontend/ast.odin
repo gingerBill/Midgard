@@ -52,10 +52,12 @@ Ast_Expr :: struct {
 		^Ast_Index_Expr,
 		^Ast_Slice_Expr,
 		^Ast_Key_Value_Expr,
+		
 		^Ast_Pointer_Type,
 		^Ast_Array_Type,
 		^Ast_Struct_Type,
 		^Ast_Proc_Type,
+
 		^Ast_Field,
 		^Ast_Field_List,
 	},
@@ -227,7 +229,9 @@ Ast_Switch_Stmt :: struct {
 	switch_pos: Pos,
 	init:       ^Ast_Stmt,
 	cond:       ^Ast_Expr,
-	body:       ^Ast_Stmt,
+	open:       Pos,
+	clauses:    []^Ast_Case_Clause,
+	close:      Pos,
 }
 
 Ast_Case_Clause :: struct {

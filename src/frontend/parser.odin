@@ -795,7 +795,7 @@ parse_switch_stmt :: proc(p: ^Parser) -> ^Ast_Switch_Stmt {
 	}
 
 	open := expect_token(p, .Open_Brace);
-	clauses: [dynamic]^Ast_Stmt;
+	clauses: [dynamic]^Ast_Case_Clause;
 
 	for p.curr_tok.kind == .Case {
 		append(&clauses, parse_case_clause(p));
@@ -804,19 +804,14 @@ parse_switch_stmt :: proc(p: ^Parser) -> ^Ast_Switch_Stmt {
 	close := expect_token(p, .Close_Brace);
 	expect_semicolon(p);
 
-	body := new_node(p, Ast_Block_Stmt);
-	body.pos = open.pos;
-	body.end = end_pos(close);
-	body.open = open.pos;
-	body.stmts = clauses[:];
-	body.close = close.pos;
-
 	s := new_node(p, Ast_Switch_Stmt);
 	s.pos = tok.pos;
-	s.end = body.end;
+	s.end = end_pos(close); 
 	s.init = stmt1;
 	s.cond = parser_conv_to_expr(p, stmt2, "switch expression");
-	s.body = body;
+	s.open = open.pos;
+	s.clauses = clauses[:];
+	s.close = close.pos;
 
 	return s;
 

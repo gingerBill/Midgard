@@ -2,6 +2,7 @@ package wasm_frontend
 
 import "core:mem"
 import "core:fmt"
+import "intrinsics"
 
 Parser :: struct {
 	file: ^File,
@@ -38,15 +39,15 @@ new_node :: proc(p: ^Parser, $T: typeid) -> ^T {
 	if p.node_allocator.procedure == nil {
 		p.node_allocator = context.allocator;
 	}
-	p := new(T, p.node_allocator);
-	p.derived = p^;
-	return p;
+	n := new(T, p.node_allocator);
+	n.variant = n;
+	return n;
 }
 
 unparen :: proc(expr: ^Ast_Expr) -> ^Ast_Expr {
 	x := expr;
 	for {
-		if p, is_paren := x.derived.(Ast_Paren_Expr); is_paren {
+		if p, is_paren := x.variant.(^Ast_Paren_Expr); is_paren {
 			x = p.expr;
 		} else {
 			break;
@@ -263,8 +264,8 @@ is_blank_ident_token :: inline proc(tok: Token) -> bool {
 	}
 	return false;
 }
-is_blank_ident_node :: inline proc(node: ^Ast_Node) -> bool {
-	if ident, ok := node.derived.(Ast_Ident); ok {
+is_blank_ident_node :: inline proc(node: ^Ast_Expr) -> bool {
+	if ident, ok := node.variant.(^Ast_Ident); ok {
 		return is_blank_ident(ident.name);
 	}
 	return true;
@@ -526,7 +527,7 @@ parse_stmt :: proc(p: ^Parser) -> ^Ast_Stmt {
 	     .Open_Bracket, .Struct, .Pointer,
 	     .Add, .Sub, .And, .Xor, .Not:
 		s := parser_simple_stmt(p, .Label_Ok);
-		if _, ok := s.derived.(Ast_Labeled_Stmt); !ok {
+		if _, ok := s.variant.(^Ast_Labeled_Stmt); !ok {
 			expect_semicolon(p);
 		}
 		return s;
@@ -562,7 +563,7 @@ parse_stmt :: proc(p: ^Parser) -> ^Ast_Stmt {
 	case .Defer:
 		tok := advance_token(p);
 		stmt := parse_stmt(p);
-		if inner, ok := stmt.derived.(Ast_Defer_Stmt); ok {
+		if inner, ok := stmt.variant.(^Ast_Defer_Stmt); ok {
 			parser_error(p, inner.pos, "illegal nested defer statement");
 			stmt = inner.stmt;
 		}
@@ -862,9 +863,9 @@ parser_simple_stmt :: proc(p: ^Parser, mode: Simple_Stmt_Mode) -> ^Ast_Stmt {
 
 	if p.curr_tok.kind == .Colon {
 		colon := advance_token(p);
-		if label, ok := lhs[0].derived.(Ast_Ident); mode == .Label_Ok && ok {
+		if label, ok := lhs[0].variant.(^Ast_Ident); mode == .Label_Ok && ok {
 			stmt := parse_stmt(p);
-			if inner, is_label := stmt.derived.(Ast_Labeled_Stmt); is_label {
+			if inner, is_label := stmt.variant.(^Ast_Labeled_Stmt); is_label {
 				parser_error(p, inner.pos, "illegal nested label declaration");
 				stmt = inner.stmt;
 			}
@@ -897,12 +898,12 @@ parser_conv_to_expr :: proc(p: ^Parser, s: ^Ast_Stmt, want: string) -> ^Ast_Expr
 		return nil;
 	}
 
-	if es, ok := s.derived.(Ast_Expr_Stmt); ok {
+	if es, ok := s.variant.(^Ast_Expr_Stmt); ok {
 		return parser_check_expr(p, es.expr);
 	}
 
 	found := "simple statement";
-	if _, ok := s.derived.(Ast_Assign_Stmt); ok {
+	if _, ok := s.variant.(^Ast_Assign_Stmt); ok {
 		found = "assignment";
 	}
 	parser_error(p, s.pos, "expected {}, found {}", want, found);
@@ -1034,20 +1035,20 @@ parse_expr :: proc(p: ^Parser, is_lhs: bool) -> ^Ast_Expr {
 
 parser_check_expr :: proc(p: ^Parser, expr: ^Ast_Expr) -> ^Ast_Expr {
 	x := unparen(expr);
-	switch _ in x.derived {
-	case Ast_Paren_Expr:
+	#partial switch _ in x.variant {
+	case ^Ast_Paren_Expr:
 		unreachable();
-	case Ast_Bad_Expr:
-	case Ast_Ident:
-	case Ast_Basic_Lit:
-	case Ast_Comp_Lit:
-	case Ast_Proc_Lit:
-	case Ast_Selector_Expr:
-	case Ast_Index_Expr:
-	case Ast_Slice_Expr:
-	case Ast_Call_Expr:
-	case Ast_Unary_Expr:
-	case Ast_Binary_Expr:
+	case ^Ast_Bad_Expr:
+	case ^Ast_Ident:
+	case ^Ast_Basic_Lit:
+	case ^Ast_Comp_Lit:
+	case ^Ast_Proc_Lit:
+	case ^Ast_Selector_Expr:
+	case ^Ast_Index_Expr:
+	case ^Ast_Slice_Expr:
+	case ^Ast_Call_Expr:
+	case ^Ast_Unary_Expr:
+	case ^Ast_Binary_Expr:
 	case:
 		parser_error(p, x.pos, "expected expression");
 		bad := new_node(p, Ast_Bad_Expr);
@@ -1060,8 +1061,8 @@ parser_check_expr :: proc(p: ^Parser, expr: ^Ast_Expr) -> ^Ast_Expr {
 
 parser_check_expr_or_type :: proc(p: ^Parser, expr: ^Ast_Expr) -> ^Ast_Expr {
 	x := unparen(expr);
-	switch _ in x.derived {
-	case Ast_Paren_Expr:
+	#partial switch _ in x.variant {
+	case ^Ast_Paren_Expr:
 		unreachable();
 	}
 
@@ -1289,7 +1290,7 @@ parse_operand :: proc(p: ^Parser, is_lhs: bool) -> ^Ast_Expr {
 	}
 
 	if type := parse_try_type(p); type != nil {
-		_, is_ident := type.derived.(Ast_Ident);
+		_, is_ident := type.variant.(^Ast_Ident);
 		assert(!is_ident, "type cannot be identifier");
 		return type;
 	}
@@ -1513,12 +1514,12 @@ parse_type :: proc(p: ^Parser)-> ^Ast_Expr {
 
 
 is_literal_type :: proc(x: ^Ast_Expr) -> bool {
-	switch t in x.derived {
-	case Ast_Bad_Expr:
-	case Ast_Ident:
-	case Ast_Selector_Expr:
-	case Ast_Array_Type:
-	case Ast_Struct_Type:
+	#partial switch t in x.variant {
+	case ^Ast_Bad_Expr:
+	case ^Ast_Ident:
+	case ^Ast_Selector_Expr:
+	case ^Ast_Array_Type:
+	case ^Ast_Struct_Type:
 	case:
 		return false;
 	}

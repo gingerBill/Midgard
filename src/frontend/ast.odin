@@ -32,25 +32,73 @@ Ast_Comment_Group :: struct {
 // Base Types
 Ast_Node :: struct {
 	pos, end: Pos, // TODO(bill): should these be just procedures instead?
-	derived: any,
 }
 
 Ast_Expr :: struct {
-	using expr_base: Ast_Node,
+	using node_base: Ast_Node,
 	tav: Type_And_Value,
+	variant: union {
+		^Ast_Bad_Expr,
+		^Ast_Ident,
+		^Ast_Basic_Lit,
+		^Ast_Unary_Expr,
+		^Ast_Binary_Expr,
+		^Ast_Paren_Expr,
+		^Ast_Deref_Expr,
+		^Ast_Call_Expr,
+		^Ast_Comp_Lit,
+		^Ast_Proc_Lit,
+		^Ast_Selector_Expr,
+		^Ast_Index_Expr,
+		^Ast_Slice_Expr,
+		^Ast_Key_Value_Expr,
+		^Ast_Pointer_Type,
+		^Ast_Array_Type,
+		^Ast_Struct_Type,
+		^Ast_Proc_Type,
+		^Ast_Field,
+		^Ast_Field_List,
+	},
 }
 Ast_Stmt :: struct {
-	using stmt_base: Ast_Node,
+	using node_base: Ast_Node,
+	variant: union {
+		^Ast_Bad_Stmt,
+		^Ast_Empty_Stmt,
+		^Ast_Expr_Stmt,
+		^Ast_Decl_Stmt,
+		^Ast_Labeled_Stmt,
+		^Ast_Assign_Stmt,
+		^Ast_Block_Stmt,
+		^Ast_Defer_Stmt,
+		^Ast_Branch_Stmt,
+		^Ast_If_Stmt,
+		^Ast_For_Stmt,
+		^Ast_Switch_Stmt,
+		^Ast_Return_Stmt,
+		^Ast_Case_Clause,
+	},
 }
 Ast_Decl :: struct {
-	using decl_base: Ast_Node,
+	using node_base: Ast_Node,
 	entity: ^Entity,
+	variant: union {
+		^Ast_Bad_Decl,
+		^Ast_Gen_Decl,
+		^Ast_Proc_Decl,
+	},
 }
 
 // Declarations
 
 Ast_Spec :: struct {
-	using spec_base: Ast_Decl,
+	using node_base: Ast_Node,
+	variant: union {
+		^Ast_Import_Spec,
+		^Ast_Value_Spec,
+		^Ast_Type_Spec,
+		^Ast_Foreign_Spec,
+	},
 }
 
 
@@ -352,3 +400,4 @@ Ast_Proc_Type :: struct {
 	params:  ^Ast_Field_List,
 	results: ^Ast_Field_List,
 }
+

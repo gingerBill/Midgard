@@ -71,6 +71,12 @@ Scope :: struct {
 	file: ^File,
 }
 
+Entity_Flag :: enum {
+	Exported
+}
+
+Entity_Flags :: bit_set[Entity_Flag; u32];
+
 Entity :: struct {
 	name:  string,
 	pos:   Pos,
@@ -79,48 +85,56 @@ Entity :: struct {
 	scope: ^Scope,
 	pkg:   ^Package,
 
-	link_name:   string,
-	is_exported: bool,
-	is_foreign:  bool,
+	link_name:       string,
+	foreign_library: ^Entity,
+	flags:           Entity_Flags,
 
 	variant: union {
-		Entity_Constant,
-		Entity_Variable,
-		Entity_Typename,
-		Entity_Procedure,
-		Entity_Import_Name,
-		Entity_Library_Name,
-		Entity_Builtin,
-		Entity_Nil,
+		^Entity_Constant,
+		^Entity_Variable,
+		^Entity_Typename,
+		^Entity_Procedure,
+		^Entity_Import_Name,
+		^Entity_Library_Name,
+		^Entity_Builtin,
+		^Entity_Nil,
 	},
 }
 
 Constant_Value :: union{bool, i64, u64, f64, string};
 
 Entity_Constant :: struct {
+	using entity: ^Entity,
 	value: Constant_Value,
 }
 Entity_Variable :: struct {
+	using entity: ^Entity,
 	field_index: i32,
 	field_src_index: i32,
 }
 Entity_Typename :: struct {
+	using entity: ^Entity,
 }
 Entity_Procedure :: struct {
+	using entity: ^Entity,
 }
 Entity_Import_Name :: struct {
-	path: string,
-	name: string,
-	scope: ^Scope,
+	using entity: ^Entity,
+	import_path: string,
+	import_name: string,
+	import_scope: ^Scope,
 }
 Entity_Library_Name :: struct {
-	path: string,
-	name: string,
+	using entity: ^Entity,
+	library_path: string,
+	library_name: string,
 }
 Entity_Builtin :: struct {
+	using entity: ^Entity,
 	id: Builtin_Id,
 }
 Entity_Nil :: struct {
+	using entity: ^Entity,
 }
 
 
@@ -184,16 +198,16 @@ scope_insert_with_name :: proc(s: ^Scope, e: ^Entity, name: string) -> ^Entity {
 
 collect_entities :: proc(c: ^Checker_Context, decls: []^Ast_Decl) {
 	for decl in decls {
-		switch d in decl.derived {
-		case Ast_Bad_Decl:
+		switch d in decl.variant {
+		case ^Ast_Bad_Decl:
 			// Ignore
 
-		case Ast_Gen_Decl:
+		case ^Ast_Gen_Decl:
 			fmt.println(d.tok.text);
 			for spec in d.specs {
-				switch s in spec.derived {
-				case Ast_Import_Spec:
-				case Ast_Value_Spec:
+				switch s in spec.variant {
+				case ^Ast_Import_Spec:
+				case ^Ast_Value_Spec:
 					#partial switch s.keyword.kind {
 					case .Const:
 						type := s.type;
@@ -208,12 +222,12 @@ collect_entities :: proc(c: ^Checker_Context, decls: []^Ast_Decl) {
 					case:
 						c.err(decl.pos, "invalid token: {}", s.keyword.kind);
 					}
-				case Ast_Type_Spec:
-				case Ast_Foreign_Spec:
+				case ^Ast_Type_Spec:
+				case ^Ast_Foreign_Spec:
 				}
 			}
 
-		case Ast_Proc_Decl:
+		case ^Ast_Proc_Decl:
 			fmt.println(d.type.tok.text, d.name.name);
 
 		case:

@@ -2,11 +2,19 @@ package frontend
 
 import "core:fmt"
 import "core:strings"
+import "core:sync"
 
 Error_Handler :: #type proc(pos: Pos, fmt: string, args: ..any);
 
+error_mutex: sync.Mutex;
+init_error_system :: proc() {
+	sync.mutex_init(&error_mutex);
+}
+
 check_error :: proc(pos: Pos, msg: string, args: ..any) {
+	sync.mutex_lock(&error_mutex);
 	default_error_handler(pos, msg, ..args);
+	sync.mutex_unlock(&error_mutex);
 }
 
 

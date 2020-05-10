@@ -3,6 +3,7 @@ package frontend
 import "intrinsics"
 import "core:fmt"
 import "core:strings"
+import "core:thread"
 import "../constant"
 
 universal_scope: ^Scope;
@@ -21,6 +22,14 @@ Checker :: struct {
 
 	err: Error_Handler,
 }
+
+Proc_Info :: struct {
+	entity: ^Procedure,
+	decl: ^Decl_Info,
+	type: ^Signature,
+	body: ^Ast_Block_Stmt,
+}
+
 
 Entity_Path :: struct {
 	parent: ^Entity_Path,
@@ -176,10 +185,11 @@ check_pkgs :: proc(c: ^Checker, pkgs: []^Package) {
 				continue;
 			}
 
-			ctx := Checker_Context{};
-			ctx.checker = c;
-			ctx.pkg = e.pkg;
-			ctx.scope = e.scope;
+			ctx := Checker_Context{
+				checker = c,
+				pkg = e.pkg,
+				scope = e.scope,
+			};
 			push_entity_path(&ctx);
 			defer pop_entity_path(&ctx);
 
@@ -188,14 +198,39 @@ check_pkgs :: proc(c: ^Checker, pkgs: []^Package) {
 
 		// NOTE(bill): Handle aliases after other declarations
 		for e in alias_list {
-			ctx := Checker_Context{};
-			ctx.checker = c;
-			ctx.pkg = e.pkg;
-			ctx.scope = e.scope;
+			ctx := Checker_Context{
+				checker = c,
+				pkg = e.pkg,
+				scope = e.scope,
+			};
 			push_entity_path(&ctx);
 			defer pop_entity_path(&ctx);
 
 			check_entity_decl(&ctx, e, nil);
 		}
+
 	}
+
+	// Check Procedure bodies
+	proc_pool := &thread.Pool{};
+	thread.pool_init(proc_pool, 4);
+	defer thread.pool_destroy(proc_pool);
+	for _, i in c.procs_to_check {
+		proc_task_proc :: proc(task: ^thread.Task) {
+			c := (^Checker)(task.data);
+			info := c.procs_to_check[task.user_index];
+			e := info.entity;
+			d := info.decl;
+			ctx := Checker_Context{
+				checker = c,
+				pkg = e.pkg,
+				decl = d,
+				scope = info.type.scope,
+			};
+			check_proc_body(&ctx, e, d);
+		}
+		thread.pool_add_task(proc_pool, proc_task_proc, c, i);
+	}
+	thread.pool_start(proc_pool);
+	thread.pool_wait_and_process(proc_pool);
 }

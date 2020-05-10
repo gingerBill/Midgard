@@ -19,13 +19,25 @@ type My_Type struct {
 }
 
 
-// // proc the_thing() {
-// // 	var x isize = 123
-// // 	proc nested() {
-// // 	}
-// // 	type Foo struct {
-// // 		x i32
-// // 		y f32
-// // 		z, w, a bool
-// // 	}
-// // }
+proc the_thing() {
+	var x isize = 123
+	type Foo struct {
+		x i32
+		y f32
+		z, w, a bool
+	}
+
+	if cond {
+		for var i = 0; i < 10; i += 1 {
+
+		}
+	}
+}
+
+
+
+proc another0() {}
+proc another1() {}
+proc another2() {}
+proc another3() {}
+proc another4() {}

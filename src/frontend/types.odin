@@ -47,6 +47,10 @@ Basic_Kind :: enum u8 {
 	string,
 
 	untyped_nil,
+	untyped_int,
+	untyped_float,
+	untyped_rune,
+	untyped_string,
 
 	byte = u8,
 }
@@ -103,7 +107,11 @@ basic_types := [Basic_Kind]Basic{
 	.rawptr = {{}, .rawptr, {.Pointer},            -1,          -1, "rawptr"},
 	.string = {{}, .string, {.String},             -2,          -1, "string"},
 
-	.untyped_nil = {{}, .untyped_nil, {.Untyped},  -1,          -1, "untyped nil"},
+	.untyped_nil    = {{}, .untyped_nil,    {.Untyped},            -1, -1, "untyped nil"},
+	.untyped_int    = {{}, .untyped_int,    {.Untyped, .Integer},  -1, -1, "untyped int"},
+	.untyped_float  = {{}, .untyped_float,  {.Untyped, .Float},    -1, -1, "untyped float"},
+	.untyped_rune   = {{}, .untyped_rune,   {.Untyped, .Rune},     -1, -1, "untyped rune"},
+	.untyped_string = {{}, .untyped_string, {.Untyped, .String},   -1, -1, "untyped string"},
 };
 
 t_invalid     := &basic_types[.Invalid];
@@ -286,6 +294,17 @@ align_formula :: proc(size, align: i64) -> i64 {
 	return s - s%align;
 }
 
+default_type :: proc(t: ^Type) -> ^Type {
+	if bt, ok := t.variant.(^Basic); ok {
+		#partial switch bt.kind {
+		case .untyped_int:    return &basic_types[.isize];
+		case .untyped_float:  return &basic_types[.f64];
+		case .untyped_rune:   return &basic_types[.rune];
+		case .untyped_string: return &basic_types[.string];
+		}
+	}
+	return t;
+}
 
 type_is_untyped :: proc(t: ^Type) -> bool {
 	bt := type_underlying(t);
@@ -302,6 +321,7 @@ type_is_typed :: proc(t: ^Type) -> bool {
 	}
 	return true;
 }
+
 
 
 type_is_integer :: proc(t: ^Type) -> bool {

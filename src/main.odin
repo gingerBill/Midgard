@@ -33,7 +33,8 @@ main :: proc() {
 	p.err = default_error_handler;
 	parse_file(&p, file);
 
-
+	init_error_system();
+	
 	checker := &Checker{};
 	check_pkgs(checker, {pkg});
 	// for decl in file.decls {

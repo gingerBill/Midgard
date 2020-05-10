@@ -35,13 +35,6 @@ Decl_Info :: struct {
 	deps: map[^Entity]bool,
 }
 
-Proc_Info :: struct {
-	file: ^File,
-	decl: ^Decl_Info,
-	type: ^Type,
-	body: ^Ast_Block_Stmt,
-}
-
 create_scope :: proc(parent: ^Scope) -> ^Scope {
 	s := new_clone(Scope{
 		parent = parent,
@@ -119,7 +112,7 @@ report_prev_decl :: proc(c: ^Checker_Context, prev: ^Entity) {
 	}
 }
 
-declare_entity :: proc(c: ^Checker_Context, scope: ^Scope, ident: ^Ast_Ident, e: ^Entity, pos: Pos) {
+declare_entity :: proc(c: ^Checker_Context, scope: ^Scope, ident: ^Ast_Ident, e: ^Entity) {
 	assert(e != nil);
 	e.ident = ident;
 	e.pos = ident.pos;
@@ -140,7 +133,7 @@ declare_pkg_entity :: proc(c: ^Checker_Context, ident: ^Ast_Ident, e: ^Entity, d
 
 	append(&c.checker.entities, e);
 
-	declare_entity(c, c.pkg.scope, ident, e, {});
+	declare_entity(c, c.pkg.scope, ident, e);
 }
 
 check_arity_match :: proc(c: ^Checker_Context, s: ^Ast_Value_Spec) {
@@ -255,11 +248,12 @@ collect_entities :: proc(c: ^Checker_Context, decls: []^Ast_Decl) {
 		case ^Ast_Proc_Decl:
 			name := d.name.name;
 			e := new_procedure(d.name.pos, c.pkg, name, nil);
-			declare_entity(c, c.pkg.scope, d.name, e, {});
+			declare_entity(c, c.pkg.scope, d.name, e);
 			e.decl = new_clone(Decl_Info{
 				scope = c.file.scope,
 				proc_decl = d,
 			});
+			append(&c.checker.entities, e);
 
 		case:
 			check_error(decl.pos, "invalid AST, unknown Ast_Decl {:T}", d);
@@ -433,7 +427,7 @@ check_entity_decl :: proc(c: ^Checker_Context, entity: ^Entity, def: ^Named) {
 	case ^Constant:
 		check_constant_decl(&ctx, e, d.type_expr, d.init_expr);
 	case ^Variable:
-		check_variable_decl(&ctx, e, d.lhs, d.init_expr);
+		check_variable_decl(&ctx, e, d.lhs, d.type_expr, d.init_expr);
 	case ^Type_Name:
 		check_type_decl(&ctx, e, d.type_expr, def, d.is_alias);
 	case ^Procedure:
@@ -493,9 +487,69 @@ check_constant_decl :: proc(c: ^Checker_Context, e: ^Constant, type, init: ^Ast_
 	}
 	check_init_constant(c, e, &x);
 }
-check_variable_decl :: proc(c: ^Checker_Context, e: ^Variable, lhs: []^Variable, init: ^Ast_Expr) {
-	// TODO(bill): check_variable_decl
+check_variable_decl :: proc(c: ^Checker_Context, e: ^Variable, lhs: []^Variable, type_expr, init: ^Ast_Expr) {
+	if type_expr != nil {
+		e.type = check_type(c, type_expr);
+	}
+
+	if init == nil {
+		if type_expr == nil {
+			e.type = t_invalid;
+		}
+		return;
+	}
+
+	if lhs == nil || len(lhs) == 1 {
+		assert(lhs == nil || lhs[0] == e);
+		x: Operand;
+		check_expr(c, &x, init);
+		check_init_variable(c, e, &x, "variable declaration");
+		return;
+	}
+
+	if type_expr != nil {
+		for a in lhs {
+			a.type = e.type;
+		}
+	}
+
+	check_init_variables(c, lhs, {init}, {});
 }
+
+check_init_variable :: proc(c: ^Checker_Context, lhs: ^Variable, x: ^Operand, ctx: string) -> ^Type {
+	if x.mode == .Invalid || x.type == t_invalid || lhs.type == t_invalid {
+		if lhs.type == nil {
+			lhs.type = t_invalid;
+		}
+		return nil;
+	}
+
+	if lhs.type == nil {
+		type := x.type;
+		if type_is_untyped(type) {
+			if type == t_untyped_nil {
+				check_error(x.expr.pos, "use of untyped nil in {}", ctx);
+				lhs.type = t_invalid;
+				return nil;
+			} 
+			type = default_type(type);
+		}
+		lhs.type = type;
+	}
+
+	check_assignment(c, x, lhs.type, ctx);
+	if x.mode == .Invalid {
+		return nil;
+	}
+
+	return x.type;
+}
+
+check_init_variables :: proc(c: ^Checker_Context, lhs: []^Variable, inits: []^Ast_Expr, pos: Pos) {
+	// TODO(bill): check_init_variables 
+	// Tuple unpacking logic
+}
+
 check_type_decl :: proc(c: ^Checker_Context, e: ^Type_Name, type_expr: ^Ast_Expr, def: ^Named, is_alias: bool) {
 	assert(e.type == nil);
 
@@ -513,7 +567,30 @@ check_type_decl :: proc(c: ^Checker_Context, e: ^Type_Name, type_expr: ^Ast_Expr
 	}
 }
 check_procedure_decl :: proc(c: ^Checker_Context, e: ^Procedure, d: ^Decl_Info) {
-	// TODO(bill): check_procedure_decl
+	assert(e.type == nil);
+
+	sig := new_type(Signature);
+	e.type = sig;
+	proc_decl := d.proc_decl;
+	check_proc_type(c, sig, proc_decl.type);
+
+	if proc_decl.body != nil {
+		info := Proc_Info{
+			decl = d,
+			type = sig,
+			body = proc_decl.body,
+			entity = e,
+		};
+		append(&c.checker.procs_to_check, info);
+	}
+}
+
+check_proc_body :: proc(c: ^Checker_Context, e: ^Entity, d: ^Decl_Info) {
+	push_entity_path(c);
+	defer pop_entity_path(c);
+
+	fmt.eprintln("check_proc_body", e.name);
+	check_stmt_list(c, nil, d.proc_decl.body.stmts);
 }
 
 

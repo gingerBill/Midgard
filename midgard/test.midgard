@@ -1,22 +1,31 @@
 import "foo"
 
-const foo = 123
-var foo int = 123
+const A = 123
+var b isize = 123
 
 const (
-	foo = 123 + 345
-	foo = 123
+	C = 123 + 345
+	D = 123
 )
-type foo int
-type foo = int
+const FOO = 123
 
-proc foo() {
-	var x int = 123
-	proc name () {
-	}
-	type Foo struct {
-		x i32
-		y f32
-		z, w, a bool
-	}
+type My_Int isize
+type Int_Alias = isize
+
+type My_Type struct {
+	x i32
+	y f32
+	z, w, a bool
 }
+
+
+// // proc the_thing() {
+// // 	var x isize = 123
+// // 	proc nested() {
+// // 	}
+// // 	type Foo struct {
+// // 		x i32
+// // 		y f32
+// // 		z, w, a bool
+// // 	}
+// // }

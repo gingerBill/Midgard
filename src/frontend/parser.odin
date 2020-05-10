@@ -1,4 +1,4 @@
-package wasm_frontend
+package frontend
 
 import "core:mem"
 import "core:fmt"
@@ -354,7 +354,7 @@ parse_gen_decl :: proc(p: ^Parser, keyword: Token_Kind, f: Parse_Spec_Proc, allo
 
 	decl := new_node(p, Ast_Gen_Decl);
 	decl.pos = tok.pos;
-	decl.end = end_pos(close) if close.pos.line > 0 else specs[len(specs)-1].end;
+	decl.end = end_pos(close) if pos_is_valid(close.pos) else specs[len(specs)-1].end;
 
 	decl.tok = tok;
 	decl.open_paren = open.pos;
@@ -443,7 +443,7 @@ parse_value_spec :: proc(p: ^Parser, keyword: Token, index: int, check_semicolon
 parse_type_spec :: proc(p: ^Parser, keyword: Token, index: int, _: bool) -> ^Ast_Spec {
 	start := p.curr_tok;
 	pos := p.curr_tok.pos;
-	
+
 	spec := new_node(p, Ast_Type_Spec);
 	spec.pos = pos;
 	spec.name = parse_ident(p);
@@ -579,10 +579,10 @@ parse_stmt :: proc(p: ^Parser) -> ^Ast_Stmt {
 
 	case .Switch:
 		return parse_switch_stmt(p);
-		
+
 	case .For:
 		return parse_for_stmt(p);
-		
+
 	case .Return:
 		tok := expect_token(p, .Return);
 		results: []^Ast_Expr;
@@ -664,7 +664,7 @@ parse_if_stmt :: proc(p: ^Parser) -> ^Ast_If_Stmt {
 
 		if cond_stmt != nil {
 			cond = parser_conv_to_expr(p, cond_stmt, "boolean expression");
-		} else if semi.pos.line > 0 {
+		} else if pos_is_valid(semi.pos) {
 			if semi.text == "\n" {
 				parser_error(p, semi.pos, "unexpected newline, expected '{' after if clause");
 			} else {
@@ -806,7 +806,7 @@ parse_switch_stmt :: proc(p: ^Parser) -> ^Ast_Switch_Stmt {
 
 	s := new_node(p, Ast_Switch_Stmt);
 	s.pos = tok.pos;
-	s.end = end_pos(close); 
+	s.end = end_pos(close);
 	s.init = stmt1;
 	s.cond = parser_conv_to_expr(p, stmt2, "switch expression");
 	s.open = open.pos;
@@ -832,12 +832,12 @@ parser_simple_stmt :: proc(p: ^Parser, mode: Simple_Stmt_Mode) -> ^Ast_Stmt {
 		s.pos, s.end = decl.pos, s.end;
 		s.decl = decl;
 		return s;
-	}	
+	}
 
 	lhs := parse_lhs_list(p);
 
 	#partial switch p.curr_tok.kind {
-	case .Assign, 
+	case .Assign,
 	     .Add_Assign, .Sub_Assign, .Mul_Assign, .Quo_Assign, .Mod_Assign,
 	     .And_Assign, .Or_Assign, .Xor_Assign, .Shl_Assign, .Shr_Assign, .And_Not_Assign:
 		op := advance_token(p);
@@ -934,9 +934,103 @@ parse_signature :: proc(p: ^Parser) -> (params, results: ^Ast_Field_List) {
 	return;
 }
 
+parse_var_type :: proc(p: ^Parser) -> ^Ast_Expr {
+	// NOTE(bill): Preparing for variadic procedures
+	type := parse_try_var_type(p);
+	if type == nil {
+		pos := p.curr_tok.pos;
+		parser_error(p, pos, "expected a type");
+		advance_token(p);
+		bad := new_node(p, Ast_Bad_Expr);
+		bad.pos = pos;
+		bad.end = safe_pos(p, p.curr_tok.pos);
+		return bad;
+	}
+	return type;
+}
+
+parse_try_var_type :: proc(p: ^Parser) -> ^Ast_Expr {
+	return parse_try_type(p);
+}
+
+make_ident_list :: proc(p: ^Parser, list: []^Ast_Expr) -> []^Ast_Ident {
+	idents := make([]^Ast_Ident, len(list));
+	for x, i in list {
+		ident, is_ident := x.variant.(^Ast_Ident);
+		if !is_ident {
+			if _, is_bad := x.variant.(^Ast_Bad_Expr); !is_bad {
+				parser_error(p, x.pos, "expected identifer");
+			}
+			ident = new_node(p, Ast_Ident);
+			ident.pos = x.pos;
+			ident.end = x.end;
+			ident.name = "_";
+		}
+		idents[i] = ident;
+		
+	}
+	return idents;
+}
+
 
 parse_parameters_list :: proc(p: ^Parser) -> []^Ast_Field {
-	return nil;
+	list: [dynamic]^Ast_Expr;
+	for {
+		item := parse_var_type(p);
+		if p.curr_tok.kind != .Comma {
+			break;
+		}
+		advance_token(p);
+		if p.curr_tok.kind == .Close_Paren {
+			break;
+		}
+	}
+
+
+	if type := parse_try_var_type(p); type != nil {
+		params: [dynamic]^Ast_Field;
+
+		idents := make_ident_list(p, list[:]);
+		field := new_node(p, Ast_Field);
+		field.pos = idents[len(idents)-1].pos;
+		field.end = type.end;
+		field.names = idents;
+		append(&params, field);
+
+		if !parser_at_comma(p, "parameter list", .Close_Paren) {
+			return params[:];
+		}
+		advance_token(p);
+
+		for p.curr_tok.kind != .Close_Paren && p.curr_tok.kind != .EOF {
+			idents := parse_ident_list(p);
+			type := parse_var_type(p);
+			field := new_node(p, Ast_Field);
+			field.pos = idents[len(idents)-1].pos;
+			field.end = type.end;
+			field.names = idents;
+			append(&params, field);
+
+			if !parser_at_comma(p, "parameter list", .Close_Paren) {
+				break;
+			}
+			advance_token(p);
+
+		}
+
+		return params[:];
+	}
+
+	params := make([]^Ast_Field, len(list));
+	for typ, i in params {
+		type := list[i];
+		field := new_node(p, Ast_Field);
+		field.pos = type.pos;
+		field.end = type.end;
+		field.type = type;
+		params[i] = field;
+	}
+	return params;
 }
 
 parse_parameters :: proc(p: ^Parser) -> ^Ast_Field_List {
@@ -961,7 +1055,7 @@ parse_parameters :: proc(p: ^Parser) -> ^Ast_Field_List {
 
 parse_result :: proc(p: ^Parser) -> ^Ast_Field_List {
 	if p.curr_tok.kind == .Open_Paren {
-		return parse_parameters(p);	
+		return parse_parameters(p);
 	}
 
 	type := parse_try_type(p);
@@ -1242,7 +1336,7 @@ parse_atom_expr :: proc(p: ^Parser, is_lhs: bool) -> ^Ast_Expr {
 			} else {
 				break loop;
 			}
-		case: 
+		case:
 			break loop;
 		}
 		lhs = false;
@@ -1402,7 +1496,13 @@ parse_field_decl :: proc(p: ^Parser) -> ^Ast_Field {
 	names := parse_ident_list(p);
 	type := parse_type(p);
 	expect_semicolon(p);
-	return nil;
+
+	field := new_node(p, Ast_Field);
+	field.pos = names[0].pos if len(names) > 0 else type.pos;
+	field.end = type.end;
+	field.names = names;
+	field.type = type;
+	return field;
 }
 
 parse_try_type :: proc(p: ^Parser) -> ^Ast_Expr {
@@ -1422,7 +1522,7 @@ parse_try_type :: proc(p: ^Parser) -> ^Ast_Expr {
 		p.expr_level -= 1;
 
 		close := expect_token(p, .Close_Bracket);
-		
+
 		elem := parse_type(p);
 
 		at := new_node(p, Ast_Array_Type);

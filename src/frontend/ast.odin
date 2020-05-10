@@ -1,4 +1,4 @@
-package wasm_frontend
+package frontend
 
 
 
@@ -83,7 +83,6 @@ Ast_Stmt :: struct {
 }
 Ast_Decl :: struct {
 	using node_base: Ast_Node,
-	entity: ^Entity,
 	variant: union {
 		^Ast_Bad_Decl,
 		^Ast_Gen_Decl,
@@ -147,7 +146,7 @@ Ast_Type_Spec :: struct {
 
 Ast_Foreign_Spec :: struct {
 	using node: Ast_Spec,
-	specs: []^Ast_Spec, 
+	decls: []^Ast_Decl, 
 }
 
 
@@ -260,6 +259,7 @@ Ast_Bad_Expr :: struct {
 Ast_Ident :: struct {
 	using node: Ast_Expr,
 	name: string,
+	entity: ^Entity,
 }
 
 Ast_Basic_Lit :: struct {

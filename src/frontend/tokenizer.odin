@@ -1,15 +1,7 @@
-package wasm_frontend
+package frontend
 
 import "core:fmt"
 import "core:unicode/utf8"
-
-Error_Handler :: #type proc(pos: Pos, fmt: string, args: ..any);
-
-default_error_handler :: proc(pos: Pos, msg: string, args: ..any) {
-	fmt.eprintf("{}({}:{}) ", pos.file.fullpath, pos.line, pos.column);
-	fmt.eprintf(msg, ..args);
-	fmt.eprintf("\n");
-}
 
 Tokenizer_State :: struct {
 	ch:          rune,

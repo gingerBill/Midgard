@@ -1,4 +1,4 @@
-package wasm_frontend
+package frontend
 
 import "core:strings"
 import "core:fmt"
@@ -14,6 +14,10 @@ Pos :: struct {
 	offset: int, // starting at 0
 	line:   u32, // starting at 1
 	column: u32, // starting at 1
+}
+
+pos_is_valid :: proc(using p: Pos, ignore_file := false) -> bool {
+	return (file != nil || ignore_file) && offset >= 0 && line > 0 && column > 0;
 }
 
 pos_compare :: proc(lhs, rhs: Pos) -> int {
@@ -37,6 +41,27 @@ pos_compare :: proc(lhs, rhs: Pos) -> int {
 	}
 	return strings.compare(lhs.file.fullpath, rhs.file.fullpath);
 }
+
+pos_string :: proc(using p: Pos, allocator := context.temp_allocator) -> string {
+	b := strings.make_builder(allocator);
+	if file != nil {
+		strings.write_string(&b, file.fullpath);
+	}
+
+	if pos_is_valid(p, true) {
+		strings.write_byte(&b, '(');
+		strings.write_u64(&b, u64(line));
+		strings.write_byte(&b, ':');
+		strings.write_u64(&b, u64(column));
+		strings.write_byte(&b, ')');
+	}
+	if len(b.buf) == 0 {
+		strings.write_byte(&b, '-');
+	}
+
+	return strings.to_string(b);
+}
+
 
 Token_Kind :: enum u8 {
 	Invalid,

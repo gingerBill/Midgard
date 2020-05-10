@@ -11,42 +11,45 @@ _ :: fmt;
 
 main :: proc() {
 	using frontend;
-	path := "midgard/test.midgard";
+	path := "W:/Midgard/midgard/test.midgard";
 	src, ok := os.read_entire_file(path);
 	defer delete(src);
 	tok: Tokenizer;
 
-	file := new(File);
-	file.fullpath = path;
-	file.src = src;
+	file := &File{
+		id = 1,
+		fullpath = path,
+		src = src,
+	};
+	pkg := &Package{
+		id = 1,
+		name = "midgard",
+		fullpath = "W:/Midgard/midgard/",
+		files = []^File{file},
+	};
+	file.pkg = pkg;
 
 	p := Parser{};
 	p.err = default_error_handler;
 	parse_file(&p, file);
 
-	pkg := &Package{
-		id = 1,
-		name = "midgard",
-		fullpath = "midgard/",
-		files = []^File{file},
-	};
 
-	checker: Checker;
-	checker.err = default_error_handler;
-	check_pkgs(&checker, {pkg});
+	checker := &Checker{};
+	check_pkgs(checker, {pkg});
 	// for decl in file.decls {
 	// 	print_node(decl);
 	// }
 
-	assemble();
+	fmt.eprintln("[done]");
+	// assemble();
 }
 
 assemble :: proc() {
 	using assembler;
 	a := &Assembler{};
 
-	console_log := import_function(a, 
-		"platform", "console_log", 
+	console_log := import_function(a,
+		"platform", "console_log",
 		signature(a, {.i32}, .void));
 
 	draw_circle := import_function(a, "platform", "draw_circle", signature(a, {.f32, .f32, .f32, .f32, .f32}, .void));
@@ -54,8 +57,8 @@ assemble :: proc() {
 	draw_text := import_function(a, "platform", "draw_text",  signature(a, {.f32, .f32, .i32, .i32}, .void));
 
 
-	log_string := import_function(a, 
-		"platform", "log_string", 
+	log_string := import_function(a,
+		"platform", "log_string",
 		signature(a, {.i32, .i32}, .void));
 
 
@@ -153,7 +156,7 @@ write_html_file :: proc(binary_data: []byte) {
 	defer strings.destroy_builder(&b);
 	defer os.write_entire_file("test.html", b.buf[:]);
 
-	strings.write_string(&b, 
+	strings.write_string(&b,
 `<!doctype html>
 <html>
 <head>

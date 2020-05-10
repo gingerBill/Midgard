@@ -1,7 +1,13 @@
-package wasm_frontend
+package frontend
 
-import "core:fmt"
 import "intrinsics"
+import "core:fmt"
+import "core:strings"
+import "../constant"
+
+universal_scope: ^Scope;
+universal_pkg: ^Package;
+
 
 Checker :: struct {
 	pkgs: []^Package,
@@ -16,8 +22,13 @@ Checker :: struct {
 	err: Error_Handler,
 }
 
+Entity_Path :: struct {
+	parent: ^Entity_Path,
+	path: [dynamic]^Entity, // TODO(bill): Should this be a linked list with a custom allocator?
+}
+
 Checker_Context :: struct {
-	using checker: ^Checker,
+	checker: ^Checker,
 
 	pkg:   ^Package,
 	file:  ^File,
@@ -26,11 +37,10 @@ Checker_Context :: struct {
 
 	proc_name:      string,
 	curr_proc_decl: ^Decl_Info,
-	curr_proc_type: ^Type_Proc,
+	curr_proc_type: ^Signature,
 
-	type_path:      ^[dynamic]^Entity,
+	entity_path: ^Entity_Path,
 }
-
 
 Addressing_Mode :: enum u8 {
 	Invalid,
@@ -45,7 +55,7 @@ Addressing_Mode :: enum u8 {
 Type_And_Value :: struct {
 	mode: Addressing_Mode,
 	type: ^Type,
-	value: Constant_Value
+	value: constant.Value
 }
 
 Operand :: struct {
@@ -54,192 +64,81 @@ Operand :: struct {
 	builtin_id: Builtin_Id,
 }
 
-Scope_Kind :: enum {
-	Normal,
-	Package,
-	File,
-	Type,
-}
-Scope :: struct {
-	parent:     ^Scope,
-	prev, next: ^Scope,
-	first_child, last_child: ^Scope,
-	elements: map[string]^Entity,
+SIZES := Standard_Sizes{
+	word_size = 4,
+	max_align = 8,
+};
 
-	kind: Scope_Kind,
-	pkg:  ^Package,
-	file: ^File,
-}
 
-Entity_Flag :: enum {
-	Exported
-}
 
-Entity_Flags :: bit_set[Entity_Flag; u32];
 
-Entity :: struct {
-	name:  string,
-	pos:   Pos,
-	ident: ^Ast_Ident,
-	type:  ^Type,
-	scope: ^Scope,
-	pkg:   ^Package,
-
-	link_name:       string,
-	foreign_library: ^Entity,
-	flags:           Entity_Flags,
-
-	variant: union {
-		^Entity_Constant,
-		^Entity_Variable,
-		^Entity_Typename,
-		^Entity_Procedure,
-		^Entity_Import_Name,
-		^Entity_Library_Name,
-		^Entity_Builtin,
-		^Entity_Nil,
-	},
+push_entity_path :: proc(c: ^Checker_Context) {
+	path := new(Entity_Path);
+	if c.entity_path != nil {
+		c.entity_path.parent = path;
+	}
+	c.entity_path = path;
 }
-
-Constant_Value :: union{bool, i64, u64, f64, string};
-
-Entity_Constant :: struct {
-	using entity: ^Entity,
-	value: Constant_Value,
-}
-Entity_Variable :: struct {
-	using entity: ^Entity,
-	field_index: i32,
-	field_src_index: i32,
-}
-Entity_Typename :: struct {
-	using entity: ^Entity,
-}
-Entity_Procedure :: struct {
-	using entity: ^Entity,
-}
-Entity_Import_Name :: struct {
-	using entity: ^Entity,
-	import_path: string,
-	import_name: string,
-	import_scope: ^Scope,
-}
-Entity_Library_Name :: struct {
-	using entity: ^Entity,
-	library_path: string,
-	library_name: string,
-}
-Entity_Builtin :: struct {
-	using entity: ^Entity,
-	id: Builtin_Id,
-}
-Entity_Nil :: struct {
-	using entity: ^Entity,
+pop_entity_path :: proc(c: ^Checker_Context) {
+	assert(c.entity_path != nil);
+	parent := c.entity_path.parent;
+	delete(c.entity_path.path);
+	free(c.entity_path);
+	c.entity_path = parent;
 }
 
 
-Decl_Info :: struct {
-	parent: ^Decl_Info,
-
-	entity: ^Entity,
-	scope: ^Scope,
-
-	type_expr: ^Ast_Expr,
-	init_expr: ^Ast_Expr,
-	proc_lit:  ^Ast_Proc_Lit,
-
-	deps: map[^Entity]bool,
+operand_to_string :: proc(x: ^Operand, allocator := context.allocator) -> string {
+	b := strings.make_builder(allocator);
+	return strings.to_string(b);
 }
 
-Proc_Info :: struct {
-	file: ^File,
-	decl: ^Decl_Info,
-	type: ^Type,
-	body: ^Ast_Block_Stmt,
+operand_set_constant :: proc(x: ^Operand, tok: Token) {
+	kind: Basic_Kind;
+	#partial switch tok.kind {
+	case .Integer:
+		kind = .isize;
+	case .Float:
+		kind = .f64;
+	case .Rune:
+		kind = .rune;
+	case .String:
+		kind = .string;
+	case:
+		unreachable();
+	}
+
+	x.mode  = .Constant;
+	x.type  = &basic_types[kind];
+	x.value = constant_from_token(tok);
 }
 
-create_scope :: proc(parent: ^Scope) -> ^Scope {
-	s := new_clone(Scope{
-		parent = parent,
-	});
+init_universal :: proc(c: ^Checker) {
+	universal_scope = create_scope(nil);
+	universal_pkg = new(Package);
+	universal_pkg.scope = universal_scope;
+	universal_pkg.name = "builtin";
 
-	if parent != nil {
-		if parent.first_child == nil {
-			parent.first_child = s;
-			parent.last_child = s;
-		} else {
-			parent.last_child.next = s;
-			parent.last_child.prev = parent.last_child;
-			parent.last_child = s.next;
+	for _, i in basic_types {
+		bt := &basic_types[i];
+		bt.variant = bt; // Initialize its variant here
+		if strings.contains(bt.name, " ") {
+			continue;
 		}
+
+		tname := new_type_name({}, universal_pkg, bt.name, bt);
+		scope_insert(universal_scope, tname);
 	}
-	return s;
-}
-
-scope_insert :: proc(s: ^Scope, e: ^Entity) -> ^Entity {
-	return scope_insert_with_name(s, e, e.name);
-}
-
-scope_insert_with_name :: proc(s: ^Scope, e: ^Entity, name: string) -> ^Entity {
-	if name == "" {
-		return nil;
-	}
-	found := s.elements[name];
-	if found != nil {
-		return found;
-	}
-
-	s.elements[name] = e;
-	if e.scope == nil {
-		e.scope = s;
-	}
-	return nil;
-}	
-
-collect_entities :: proc(c: ^Checker_Context, decls: []^Ast_Decl) {
-	for decl in decls {
-		switch d in decl.variant {
-		case ^Ast_Bad_Decl:
-			// Ignore
-
-		case ^Ast_Gen_Decl:
-			fmt.println(d.tok.text);
-			for spec in d.specs {
-				switch s in spec.variant {
-				case ^Ast_Import_Spec:
-				case ^Ast_Value_Spec:
-					#partial switch s.keyword.kind {
-					case .Const:
-						type := s.type;
-						for name, i in s.names {
-							init: ^Ast_Expr;
-							if i < len(s.values) {
-								init = s.values[i];
-							}
-						}
-					case .Var:
-						
-					case:
-						c.err(decl.pos, "invalid token: {}", s.keyword.kind);
-					}
-				case ^Ast_Type_Spec:
-				case ^Ast_Foreign_Spec:
-				}
-			}
-
-		case ^Ast_Proc_Decl:
-			fmt.println(d.type.tok.text, d.name.name);
-
-		case:
-			c.err(decl.pos, "invalid AST, unknown Ast_Decl {:T}", d);
-		}
-	}
+	_, e_u8 := scope_lookup_parent(universal_scope, "u8");
+	scope_insert_with_name(universal_scope, e_u8, "byte");
 }
 
 
 check_pkgs :: proc(c: ^Checker, pkgs: []^Package) {
+	init_universal(c);
+
 	for pkg in pkgs {
-		pkg.scope = create_scope(nil);
+		pkg.scope = create_scope(universal_scope);
 		pkg.scope.kind = .Package;
 		pkg.scope.pkg = pkg;
 		for file in pkg.files {
@@ -265,6 +164,38 @@ check_pkgs :: proc(c: ^Checker, pkgs: []^Package) {
 			ctx.file = file;
 			ctx.scope = file.scope;
 			collect_entities(&ctx, file.decls[:]);
+		}
+	}
+
+	{ // check package entities
+		alias_list: [dynamic]^Type_Name;
+		defer delete(alias_list);
+		for e in c.entities {
+			if tn, _ := e.variant.(^Type_Name); tn != nil && e.decl != nil && e.decl.is_alias {
+				append(&alias_list, tn);
+				continue;
+			}
+
+			ctx := Checker_Context{};
+			ctx.checker = c;
+			ctx.pkg = e.pkg;
+			ctx.scope = e.scope;
+			push_entity_path(&ctx);
+			defer pop_entity_path(&ctx);
+
+			check_entity_decl(&ctx, e, nil);
+		}
+
+		// NOTE(bill): Handle aliases after other declarations
+		for e in alias_list {
+			ctx := Checker_Context{};
+			ctx.checker = c;
+			ctx.pkg = e.pkg;
+			ctx.scope = e.scope;
+			push_entity_path(&ctx);
+			defer pop_entity_path(&ctx);
+
+			check_entity_decl(&ctx, e, nil);
 		}
 	}
 }

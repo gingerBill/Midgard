@@ -8,8 +8,6 @@ Standard_Sizes :: struct {
 }
 
 Type :: struct {
-	cached_size:  i64,
-	cached_align: i64,
 	variant: union {
 		^Basic,
 		^Array,
@@ -23,7 +21,7 @@ Type :: struct {
 }
 
 Basic_Kind :: enum u8 {
-	Invalid,
+	invalid,
 
 	bool,
 
@@ -47,12 +45,11 @@ Basic_Kind :: enum u8 {
 	string,
 
 	untyped_nil,
+	untyped_bool,
 	untyped_int,
 	untyped_float,
 	untyped_rune,
 	untyped_string,
-
-	byte = u8,
 }
 
 Basic_Flag :: enum u8 {
@@ -83,8 +80,8 @@ Basic :: struct {
 }
 
 
-basic_types := [Basic_Kind]Basic{
-	.Invalid = {},
+btype := [Basic_Kind]Basic{
+	.invalid = {},
 
 	.bool   = {{}, .bool,   {.Boolean},            1,           1,  "bool"},
 
@@ -108,30 +105,13 @@ basic_types := [Basic_Kind]Basic{
 	.string = {{}, .string, {.String},             -2,          -1, "string"},
 
 	.untyped_nil    = {{}, .untyped_nil,    {.Untyped},            -1, -1, "untyped nil"},
+	.untyped_bool   = {{}, .untyped_bool,   {.Untyped, .Boolean},  -1, -1, "untyped bool"},
 	.untyped_int    = {{}, .untyped_int,    {.Untyped, .Integer},  -1, -1, "untyped int"},
 	.untyped_float  = {{}, .untyped_float,  {.Untyped, .Float},    -1, -1, "untyped float"},
 	.untyped_rune   = {{}, .untyped_rune,   {.Untyped, .Rune},     -1, -1, "untyped rune"},
 	.untyped_string = {{}, .untyped_string, {.Untyped, .String},   -1, -1, "untyped string"},
 };
 
-t_invalid     := &basic_types[.Invalid];
-t_bool        := &basic_types[.bool];
-t_i8          := &basic_types[.i8];
-t_i16         := &basic_types[.i16];
-t_i32         := &basic_types[.i32];
-t_i64         := &basic_types[.i64];
-t_isize       := &basic_types[.isize];
-t_u8          := &basic_types[.u8];
-t_u16         := &basic_types[.u16];
-t_u32         := &basic_types[.u32];
-t_u64         := &basic_types[.u64];
-t_usize       := &basic_types[.usize];
-t_rune        := &basic_types[.rune];
-t_f32         := &basic_types[.f32];
-t_f64         := &basic_types[.f64];
-t_rawptr      := &basic_types[.rawptr];
-t_string      := &basic_types[.string];
-t_untyped_nil := &basic_types[.untyped_nil];
 
 
 Array :: struct {
@@ -185,12 +165,20 @@ Named :: struct {
 }
 
 new_type :: proc($T: typeid) -> ^T {
-	ptr := new(T);
-	ptr.variant = ptr;
+	t := new(T);
+	t^.variant = t;
+	return t;
+}
 
-	_x: Type = ptr^; // enforce check
-	_ = _x;
+new_tuple :: proc(vars: ..^Variable) -> ^Tuple {
+	t := new_type(Tuple);
+	t.vars = vars;
+	return t;
+}
 
+new_pointer :: proc(elem: ^Type) -> ^Pointer {
+	ptr := new_type(Pointer);
+	ptr.elem = elem;
 	return ptr;
 }
 
@@ -297,10 +285,11 @@ align_formula :: proc(size, align: i64) -> i64 {
 default_type :: proc(t: ^Type) -> ^Type {
 	if bt, ok := t.variant.(^Basic); ok {
 		#partial switch bt.kind {
-		case .untyped_int:    return &basic_types[.isize];
-		case .untyped_float:  return &basic_types[.f64];
-		case .untyped_rune:   return &basic_types[.rune];
-		case .untyped_string: return &basic_types[.string];
+		case .untyped_bool:   return &btype[.bool];
+		case .untyped_int:    return &btype[.isize];
+		case .untyped_float:  return &btype[.f64];
+		case .untyped_rune:   return &btype[.rune];
+		case .untyped_string: return &btype[.string];
 		}
 	}
 	return t;
@@ -323,6 +312,54 @@ type_is_typed :: proc(t: ^Type) -> bool {
 }
 
 
+type_has_nil :: proc(type: ^Type) -> bool {
+	switch t in type_underlying(type).variant {
+	case ^Basic:
+		return t.kind == .rawptr || t.kind == .untyped_nil;
+	case ^Array, ^Struct, ^Tuple:
+		return false;
+	case ^Slice, ^Pointer, ^Signature:
+		return true;
+	case ^Named:
+		unreachable();
+	}
+	return false;
+}
+
+type_is_comparable :: proc(type: ^Type) -> bool {
+	switch t in type_underlying(type).variant {
+	case ^Basic:
+		return t.flags & Basic_Flags_Ordered != nil;
+	case ^Array, ^Slice, ^Struct, ^Tuple:
+	case ^Pointer, ^Signature:
+		return true;
+	case ^Named:
+		unreachable();
+	}
+	return false;
+}
+type_is_ordered :: proc(type: ^Type) -> bool {
+	switch t in type_underlying(type).variant {
+	case ^Basic:
+		return t.flags & Basic_Flags_Ordered != nil;
+	case ^Array, ^Slice, ^Struct, ^Tuple, ^Signature:
+		return false;
+	case ^Pointer:
+		return true;
+	case ^Named:
+		unreachable();
+	}
+	return false;
+}
+
+
+type_is_numeric :: proc(t: ^Type) -> bool {
+	bt := type_underlying(t);
+	if b, ok := bt.variant.(^Basic); ok {
+		return b.flags & Basic_Flags_Numeric != nil;
+	}
+	return false;
+}
 
 type_is_integer :: proc(t: ^Type) -> bool {
 	bt := type_underlying(t);

@@ -18,6 +18,7 @@ Checker :: struct {
 	builtin_pkg: ^Package,
 	init_scope: ^Scope,
 
+	task_pool: thread.Pool,
 	procs_to_check: [dynamic]Proc_Info,
 
 	err: Error_Handler,
@@ -61,6 +62,16 @@ Addressing_Mode :: enum u8 {
 	Builtin,
 }
 
+addressing_mode_strings := [Addressing_Mode]string {
+	.Invalid  = "invalid",
+	.No_Value = "no value",
+	.Value    = "value",
+	.Variable = "variable",
+	.Constant = "constant",
+	.Type     = "type",
+	.Builtin  = "builtin",
+};
+
 Type_And_Value :: struct {
 	mode: Addressing_Mode,
 	type: ^Type,
@@ -78,7 +89,9 @@ SIZES := Standard_Sizes{
 	max_align = 8,
 };
 
-
+is_operand_nil :: proc(x: ^Operand) -> bool {
+	return x.type == &btype[.untyped_nil];
+}
 
 
 push_entity_path :: proc(c: ^Checker_Context) {
@@ -97,39 +110,34 @@ pop_entity_path :: proc(c: ^Checker_Context) {
 }
 
 
-operand_to_string :: proc(x: ^Operand, allocator := context.allocator) -> string {
-	b := strings.make_builder(allocator);
-	return strings.to_string(b);
-}
-
 operand_set_constant :: proc(x: ^Operand, tok: Token) {
 	kind: Basic_Kind;
 	#partial switch tok.kind {
 	case .Integer:
-		kind = .isize;
+		kind = .untyped_int;
 	case .Float:
-		kind = .f64;
+		kind = .untyped_float;
 	case .Rune:
-		kind = .rune;
+		kind = .untyped_rune;
 	case .String:
-		kind = .string;
+		kind = .untyped_string;
 	case:
 		unreachable();
 	}
 
 	x.mode  = .Constant;
-	x.type  = &basic_types[kind];
+	x.type  = &btype[kind];
 	x.value = constant_from_token(tok);
 }
 
 init_universal :: proc(c: ^Checker) {
-	universal_scope = create_scope(nil);
+	universal_scope = create_scope(nil, {}, {});
 	universal_pkg = new(Package);
 	universal_pkg.scope = universal_scope;
 	universal_pkg.name = "builtin";
 
-	for _, i in basic_types {
-		bt := &basic_types[i];
+	for _, i in btype {
+		bt := &btype[i];
 		bt.variant = bt; // Initialize its variant here
 		if strings.contains(bt.name, " ") {
 			continue;
@@ -138,8 +146,12 @@ init_universal :: proc(c: ^Checker) {
 		tname := new_type_name({}, universal_pkg, bt.name, bt);
 		scope_insert(universal_scope, tname);
 	}
-	_, e_u8 := scope_lookup_parent(universal_scope, "u8");
+	_, e_u8 := scope_lookup(universal_scope, "u8");
 	scope_insert_with_name(universal_scope, e_u8, "byte");
+
+	scope_insert(universal_scope, new_constant({}, universal_pkg, "false", &btype[.untyped_bool], false));
+	scope_insert(universal_scope, new_constant({}, universal_pkg, "true", &btype[.untyped_bool], true));
+	scope_insert(universal_scope, new_nil_entity({}, universal_pkg, "nil"));
 }
 
 
@@ -147,11 +159,12 @@ check_pkgs :: proc(c: ^Checker, pkgs: []^Package) {
 	init_universal(c);
 
 	for pkg in pkgs {
-		pkg.scope = create_scope(universal_scope);
+		pkg.scope = create_scope(universal_scope, {}, {});
 		pkg.scope.kind = .Package;
 		pkg.scope.pkg = pkg;
 		for file in pkg.files {
-			file.scope = create_scope(pkg.scope);
+			pos, end: Pos;
+			file.scope = create_scope(pkg.scope, pos, end);
 			file.scope.kind = .File;
 			file.scope.pkg  = pkg;
 			file.scope.file = file;
@@ -162,6 +175,8 @@ check_pkgs :: proc(c: ^Checker, pkgs: []^Package) {
 		}
 	}
 
+	thread.pool_init(&c.task_pool, 1);
+	defer thread.pool_destroy(&c.task_pool);
 
 	// collect entities
 	for pkg in pkgs {
@@ -211,26 +226,24 @@ check_pkgs :: proc(c: ^Checker, pkgs: []^Package) {
 
 	}
 
-	// Check Procedure bodies
-	proc_pool := &thread.Pool{};
-	thread.pool_init(proc_pool, 4);
-	defer thread.pool_destroy(proc_pool);
-	for _, i in c.procs_to_check {
-		proc_task_proc :: proc(task: ^thread.Task) {
-			c := (^Checker)(task.data);
-			info := c.procs_to_check[task.user_index];
-			e := info.entity;
-			d := info.decl;
-			ctx := Checker_Context{
-				checker = c,
-				pkg = e.pkg,
-				decl = d,
-				scope = info.type.scope,
-			};
-			check_proc_body(&ctx, e, d);
+	{ // Check Procedure bodies
+		for _, i in c.procs_to_check {
+			thread.pool_add_task(&c.task_pool, proc(task: ^thread.Task) {
+				c := (^Checker)(task.data);
+				info := c.procs_to_check[task.user_index];
+				e := info.entity;
+				d := info.decl;
+				ctx := &Checker_Context{
+					checker = c,
+					pkg = e.pkg,
+					decl = d,
+					scope = info.type.scope,
+				};
+				check_proc_body(ctx, e, d);
+			}, c, i);
 		}
-		thread.pool_add_task(proc_pool, proc_task_proc, c, i);
+		
+		thread.pool_start(&c.task_pool);
+		thread.pool_wait_and_process(&c.task_pool);
 	}
-	thread.pool_start(proc_pool);
-	thread.pool_wait_and_process(proc_pool);
 }

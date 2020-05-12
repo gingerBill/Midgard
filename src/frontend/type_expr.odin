@@ -9,9 +9,9 @@ check_ident :: proc(c: ^Checker_Context, x: ^Operand, ident: ^Ast_Ident, def: ^N
 
 	x.mode = .Invalid;
 	x.expr = ident;
-	x.type = t_invalid;
+	x.type = &btype[.invalid];
 
-	scope, e := scope_lookup_parent(c.scope, ident.name);
+	scope, e := scope_lookup(c.scope, ident.name);
 	if e == nil {
 		if ident.name == "_" {
 			check_error(ident.pos, "cannot use _ as a value or type");
@@ -35,7 +35,7 @@ check_ident :: proc(c: ^Checker_Context, x: ^Operand, ident: ^Ast_Ident, def: ^N
 		return;
 	case ^Constant:
 		add_decl_dep(c, e);
-		if type == t_invalid {
+		if type == &btype[.invalid] {
 			return;
 		}
 		x.value = e.value;
@@ -47,7 +47,7 @@ check_ident :: proc(c: ^Checker_Context, x: ^Operand, ident: ^Ast_Ident, def: ^N
 			e.flags |= {.Used};
 		}
 		add_decl_dep(c, e);
-		if type == t_invalid {
+		if type == &btype[.invalid] {
 			return;
 		}
 		x.mode = .Variable;
@@ -152,7 +152,7 @@ check_type_internal :: proc(c: ^Checker_Context, expr: ^Ast_Expr, def: ^Named) -
 		check_error(expr.pos, "expression is not a type");
 	}
 
-	type := t_invalid;
+	type := &btype[.invalid];
 	set_underlying(def, type);
 	return type;
 }
@@ -170,7 +170,7 @@ check_array_length :: proc(c: ^Checker_Context, n: ^Ast_Expr) -> i64 {
 	}
 	if type_is_untyped(x.type) || type_is_integer(x.type) {
 		if val, ok := constant.as_int(x.value); ok {
-			if representable_as_constant(c, val, &basic_types[.isize], nil) {
+			if representable_as_constant(c, val, &btype[.isize], nil) {
 				if n, ok := constant.as_i64(val); ok && n >= 0 {
 					return i64(n);
 				}
@@ -207,6 +207,52 @@ check_struct_type :: proc(c: ^Checker_Context, type: ^Struct, expr: ^Ast_Struct_
 
 	type.fields = fields[:];
 }
-check_proc_type :: proc(c: ^Checker_Context, type: ^Signature, expr: ^Ast_Proc_Type) {
+check_proc_type :: proc(c: ^Checker_Context, sig: ^Signature, proc_type: ^Ast_Proc_Type) {
+	scope := create_scope(c.scope, {}, {}, "procedure");
+	scope.kind = .Procedure;
+	proc_type.scope = scope;
+
+	params := collect_params(c, scope, proc_type.params);
+	results := collect_params(c, scope, proc_type.results);
+
+	sig.scope = scope;
+	sig.params = new_tuple(..params);
+	sig.results = new_tuple(..results);
+
 	return;
+}
+
+collect_params :: proc(c: ^Checker_Context, scope: ^Scope, list: ^Ast_Field_List) -> []^Variable {
+	if list == nil {
+		return nil;
+	}
+	params: [dynamic]^Variable;
+
+	named, anonymous: bool;
+	for field, i in list.list {
+		check_error(field.pos, "{}", field);
+		type := check_type(c, field.type);
+		if len(field.names) > 0 {
+			for name in field.names {
+				if name.name == "" {
+					check_error(name.pos, "invalid AST anonymous parameter");
+				}
+				param := new_param(name.pos, c.pkg, name.name, type);
+				declare_entity(c, c.scope, name, param);
+				append(&params, param);
+			}
+			named = true;
+		} else {
+			param := new_param(field.type.pos, c.pkg, "", type);
+			field.implicit = param;
+			append(&params, param);
+			anonymous = true;
+		}
+	}
+
+	if named && anonymous {
+		check_error(list.pos, "invalid AST containing both named and anonymous parameters");
+	}
+
+	return params[:];	
 }

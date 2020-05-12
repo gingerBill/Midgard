@@ -9,8 +9,10 @@ const (
 )
 const FOO = 123
 
-type My_Int isize
-type Int_Alias = isize
+type (
+	My_Int isize
+	Int_Alias = isize
+)
 
 type My_Type struct {
 	x i32
@@ -27,8 +29,17 @@ proc the_thing() {
 		z, w, a bool
 	}
 
+	var cond = true
+
 	if cond {
 		for var i = 0; i < 10; i += 1 {
+
+		}
+	}
+
+	proc foo() {
+		var cond = false
+		if cond {
 
 		}
 	}

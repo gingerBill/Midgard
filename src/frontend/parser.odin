@@ -705,8 +705,8 @@ parse_if_stmt :: proc(p: ^Parser) -> ^Ast_If_Stmt {
 	s.pos = tok.pos;
 	s.end = else_stmt.end if else_stmt != nil else body.end;
 	s.if_pos = tok.pos;
-	s.init = nil;
-	s.cond = nil;
+	s.init = init;
+	s.cond = cond;
 	s.body = body;
 	s.else_stmt = else_stmt;
 
@@ -1173,6 +1173,8 @@ parse_binary_expr :: proc(p: ^Parser, is_lhs: bool, prec_init: int) -> ^Ast_Expr
 		be.left = parser_check_expr(p, x);
 		be.op = op;
 		be.right = parser_check_expr(p, y);
+		be.pos = be.left.pos;
+		be.end = be.right.end;
 		x = be;
 	}
 	return x;

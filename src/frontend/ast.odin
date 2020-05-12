@@ -71,9 +71,9 @@ Ast_Stmt :: struct {
 		^Ast_Decl_Stmt,
 		^Ast_Labeled_Stmt,
 		^Ast_Assign_Stmt,
-		^Ast_Block_Stmt,
 		^Ast_Defer_Stmt,
 		^Ast_Branch_Stmt,
+		^Ast_Block_Stmt,
 		^Ast_If_Stmt,
 		^Ast_For_Stmt,
 		^Ast_Switch_Stmt,
@@ -352,6 +352,7 @@ Ast_Field :: struct {
 	using node: Ast_Expr,
 	names: []^Ast_Ident,
 	type:  ^Ast_Expr,
+	implicit: ^Entity,
 }
 
 Ast_Field_List :: struct {
@@ -403,5 +404,6 @@ Ast_Proc_Type :: struct {
 	tok:     Token,
 	params:  ^Ast_Field_List,
 	results: ^Ast_Field_List,
+	scope:   ^Scope,
 }
 

@@ -294,3 +294,31 @@ token_precedence :: proc(op: Token_Kind) -> int {
 	}
 	return 0;	
 }
+
+
+assign_op :: proc(op: Token_Kind) -> Token_Kind {
+	#partial switch op {
+	case .Add_Assign:     return .Add;
+	case .Sub_Assign:     return .Sub;
+	case .Mul_Assign:     return .Mul;
+	case .Quo_Assign:     return .Quo;
+	case .Mod_Assign:     return .Mod;
+
+	case .And_Assign:     return .And;
+	case .Or_Assign:      return .Or;
+	case .Xor_Assign:     return .Xor;
+	case .Shl_Assign:     return .Shl;
+	case .Shr_Assign:     return .Shr;
+	case .And_Not_Assign: return .And_Not;
+	}
+
+	return .Invalid;
+}
+
+is_comparison :: proc(op: Token_Kind) -> bool {
+	#partial switch op {
+	case .Cmp_Eq, .Not_Eq, .Lt, .Gt, .Lt_Eq, .Gt_Eq:
+		return true;
+	}
+	return false;
+}

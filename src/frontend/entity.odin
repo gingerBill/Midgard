@@ -6,6 +6,7 @@ Entity_Flag :: enum {
 	Used,
 	Exported,
 	Field,
+	Parameter,
 }
 
 Entity_Flags :: bit_set[Entity_Flag; u32];
@@ -130,6 +131,23 @@ new_field :: proc(pos: Pos, pkg: ^Package, name: string, type: ^Type) -> ^Variab
 	f.flags |= {.Field};
 	return f;
 }
+
+new_param :: proc(pos: Pos, pkg: ^Package, name: string, type: ^Type) -> ^Variable {
+	f := new_variable(pos, pkg, name, type);
+	f.flags |= {.Parameter};
+	return f;
+}
+
+new_nil_entity :: proc(pos: Pos, pkg: ^Package, name: string) -> ^Nil {
+	e := new(Nil);
+	e.variant = e;
+	e.pkg = pkg;
+	e.name = name;
+	e.type = &btype[.untyped_nil];
+	e.colour = entity_colour_for(e.type);
+	return e;
+}
+
 
 
 type_name_is_alias :: proc(tname: ^Type_Name) -> bool {

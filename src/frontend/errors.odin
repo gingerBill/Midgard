@@ -32,8 +32,23 @@ default_error_handler :: proc(pos: Pos, msg: string, args: ..any) {
 		switch a in arg {
 		case Operand:
 			panic("internal error: ^Operand should be used");
-		case ^Operand:            arg = operand_to_string(a);
+
+		case ^Operand:   arg = operand_string(a);
+		case Token:      arg = a.text;
+		case Token_Kind: arg = tokens[a];
+
+		case ^Type:      arg = type_string(a);
+		case ^Basic:     arg = type_string(a);
+		case ^Array:     arg = type_string(a);
+		case ^Slice:     arg = type_string(a);
+		case ^Struct:    arg = type_string(a);
+		case ^Pointer:   arg = type_string(a);
+		case ^Tuple:     arg = type_string(a);
+		case ^Signature: arg = type_string(a);
+		case ^Named:     arg = type_string(a);
+
 		case Pos:                 arg = pos_string(a);
+
 		case ^Ast_Expr:           arg = expr_string(a);
 		case ^Ast_Bad_Expr:       arg = expr_string(a);
 		case ^Ast_Key_Value_Expr: arg = expr_string(a);
@@ -65,8 +80,66 @@ default_error_handler :: proc(pos: Pos, msg: string, args: ..any) {
 }
 
 
+
+operand_string :: proc(x: ^Operand, allocator := context.allocator) -> string {
+	write_byte :: strings.write_byte;
+	write_string :: strings.write_string;
+
+	b := strings.make_builder(allocator);
+	if x.expr != nil {
+		write_expr(&b, x.expr);
+	} else {
+		#partial switch x.mode {
+		case .Builtin:
+			write_string(&b, builtin_procs[x.builtin_id].name);
+		case .Type:
+			write_type(&b, x.type);
+		case .Constant:
+			fmt.sbprint(&b, x.value);
+		}
+	}
+	enclose := len(b.buf) != 0;
+	if enclose {
+		write_string(&b, " (");
+	}
+
+	has_type := false;
+	switch x.mode {
+	case .Invalid, .No_Value, .Type, .Builtin:
+		// ignore
+
+	case: fallthrough;
+	case .Value, .Variable, .Constant:
+		if x.type != nil {
+			if type_is_untyped(x.type) {
+				write_string(&b, x.type.variant.(^Basic).name);
+				write_byte(&b, ' ');
+				break;
+			}
+			has_type = true;
+		}
+	}
+
+	write_string(&b, addressing_mode_strings[x.mode]);
+
+	if has_type {
+		if x.type != &btype[.invalid] {
+			write_string(&b, " of type ");
+			write_type(&b, x.type);
+		} else {
+			write_string(&b, " with invalid type");
+		}
+	}
+
+	if enclose {
+		write_byte(&b, ')');
+	}
+
+	return strings.to_string(b);
+}
+
 expr_string :: proc(x: ^Ast_Expr, allocator := context.temp_allocator) -> string {
-	b := strings.make_builder();
+	b := strings.make_builder(allocator);
 	write_expr(&b, x);
 	return strings.to_string(b);
 }
@@ -220,4 +293,87 @@ write_field_list :: proc(b: ^strings.Builder, fields: ^Ast_Field_List, sep: stri
 
 		write_expr(b, f.type);
 	}
+}
+
+type_string :: proc(type: ^Type, allocator := context.temp_allocator) -> string {
+	b := strings.make_builder(allocator);
+	write_type(&b, type);
+	return strings.to_string(b);
+}
+
+
+write_type :: proc(b: ^strings.Builder, type: ^Type) {
+	write_tuple :: proc(b: ^strings.Builder, t: ^Tuple, parens: bool) {
+		if len(t.vars) == 1 && t.vars[0].name == "" {
+			write_type(b, t.vars[0].type);
+			return;
+		} 
+		if parens do write_byte(b, '(');
+		for var, i in t.vars {
+			if i > 0 {
+				write_string(b, ", ");
+			}
+			if var.name != "" {
+				write_string(b, var.name);
+				write_byte(b, ' ');
+			}
+			write_type(b, var.type);
+		}
+		if parens do write_byte(b, ')');
+	}
+
+	write_byte :: strings.write_byte;
+	write_i64 :: strings.write_i64;
+	write_string :: strings.write_string;
+
+	if type == nil {
+		write_string(b, "<nil>");
+		return;
+	}
+
+	switch t in type.variant {
+	case ^Basic:
+		write_string(b, t.name);
+	case ^Array:
+		write_byte(b, '[');
+		write_i64(b, t.len);
+		write_byte(b, ']');
+		write_type(b, t.elem);
+
+	case ^Slice:
+		write_string(b, "[]");
+		write_type(b, t.elem);
+
+	case ^Struct:
+		write_string(b, "struct {");
+		for field, i in t.fields {
+			if i > 0 {
+				write_string(b, "; ");
+			}
+			if field.name != "" {
+				write_string(b, field.name);
+				write_byte(b, ' ');
+			}
+			write_type(b, field.type);
+		}
+		write_byte(b, '}');
+
+	case ^Pointer:
+		write_byte(b, '^');
+		write_type(b, t.elem);
+
+	case ^Tuple:
+		write_tuple(b, t, true);
+
+	case ^Signature:
+		write_string(b, "proc");
+		write_tuple(b, t.params, true);
+		if t.results != nil {
+			write_tuple(b, t.results, true);
+		}
+
+	case ^Named:
+		write_string(b, t.entity.name);
+	}
+
 }

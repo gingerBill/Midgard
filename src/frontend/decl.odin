@@ -8,6 +8,7 @@ Scope_Kind :: enum {
 	Package,
 	File,
 	Type,
+	Procedure,
 }
 Scope :: struct {
 	parent:     ^Scope,
@@ -15,9 +16,15 @@ Scope :: struct {
 	first_child, last_child: ^Scope,
 	elems: map[string]^Entity,
 
+	pos: Pos,
+	end: Pos,
+
 	kind: Scope_Kind,
 	pkg:  ^Package,
 	file: ^File,
+	comment: string,
+
+	delayed: [dynamic]^Entity,
 }
 
 
@@ -35,19 +42,22 @@ Decl_Info :: struct {
 	deps: map[^Entity]bool,
 }
 
-create_scope :: proc(parent: ^Scope) -> ^Scope {
+create_scope :: proc(parent: ^Scope, pos, end: Pos, comment: string = "") -> ^Scope {
 	s := new_clone(Scope{
 		parent = parent,
+		comment = comment,
+		pos = pos,
+		end = end,
 	});
 
-	if parent != nil {
+	if parent != nil && parent != universal_scope {
 		if parent.first_child == nil {
 			parent.first_child = s;
 			parent.last_child = s;
 		} else {
+			s.prev = parent.last_child;
 			parent.last_child.next = s;
-			parent.last_child.prev = parent.last_child;
-			parent.last_child = s.next;
+			parent.last_child = s;
 		}
 	}
 	return s;
@@ -76,20 +86,37 @@ scope_insert_with_name :: proc(s: ^Scope, e: ^Entity, name: string) -> ^Entity {
 	return nil;
 }	
 
-scope_lookup :: proc(s: ^Scope, name: string) -> ^Entity {
+scope_lookup_current :: proc(s: ^Scope, name: string) -> ^Entity {
 	if name == "" || name == "_" {
 		return nil;
 	}
 	return s.elems[name];
 }
 
-scope_lookup_parent :: proc(scope: ^Scope, name: string) -> (^Scope, ^Entity) {
+scope_lookup :: proc(scope: ^Scope, name: string) -> (found_scope: ^Scope, found_entity: ^Entity) {
+	gone_thru_boundary := false;
+	
 	for s := scope; s != nil; s = s.parent {
 		if e := s.elems[name]; e != nil {
-			return s, e;
+			if gone_thru_boundary {
+				if _, is_var := e.variant.(^Variable); is_var && (e.scope.kind != .File && e.scope.kind != .Package) {
+					continue;
+				}
+			}
+
+			found_scope = s;
+			found_entity = e;
+			return;
+		}
+
+		if s.kind == .Procedure {
+			gone_thru_boundary = true;
+		}
+		if s.kind == .Package {
+			gone_thru_boundary = true;
 		}
 	}
-	return nil, nil;
+	return;
 }
 
 
@@ -262,7 +289,7 @@ collect_entities :: proc(c: ^Checker_Context, decls: []^Ast_Decl) {
 
 	for scope := c.pkg.scope.first_child; scope != nil; scope = scope.next {
 		for name, e in scope.elems {
-			if prev := scope_lookup(c.pkg.scope, e.name); prev != nil {
+			if prev := scope_lookup_current(c.pkg.scope, e.name); prev != nil {
 				check_error(e.pos, "{} redeclared in this package", e.name);
 				report_prev_decl(c, prev);
 			}
@@ -392,16 +419,16 @@ check_entity_decl :: proc(c: ^Checker_Context, entity: ^Entity, def: ^Named) {
 		switch e in entity.variant {
 		case ^Constant:
 			if check_cycle(c, e) || e.type == nil {
-				e.type = t_invalid;
+				e.type = &btype[.invalid];
 			}
 		case ^Variable:
 			if check_cycle(c, e) || e.type == nil {
-				e.type = t_invalid;
+				e.type = &btype[.invalid];
 			}
 		case ^Type_Name:
 			if check_cycle(c, e) {
 				// NOTE(bill): Stop the cycle
-				e.type = t_invalid;
+				e.type = &btype[.invalid];
 			}
 		case ^Procedure:
 			if check_cycle(c, e) {
@@ -442,9 +469,9 @@ check_entity_decl :: proc(c: ^Checker_Context, entity: ^Entity, def: ^Named) {
 
 
 check_init_constant :: proc(c: ^Checker_Context, lhs: ^Constant, x: ^Operand) {
-	if x.mode == .Invalid || x.type == t_invalid || lhs.type == t_invalid {
+	if x.mode == .Invalid || x.type == &btype[.invalid] || lhs.type == &btype[.invalid] {
 		if lhs.type == nil {
-			lhs.type = t_invalid;
+			lhs.type = &btype[.invalid];
 		}
 		return;
 	}
@@ -452,7 +479,7 @@ check_init_constant :: proc(c: ^Checker_Context, lhs: ^Constant, x: ^Operand) {
 	if x.mode != .Constant {
 		check_error(x.expr.pos, "{} is not a constant", x);
 		if lhs.type == nil {
-			lhs.type = t_invalid;
+			lhs.type = &btype[.invalid];
 		}
 		return;
 	}
@@ -476,7 +503,7 @@ check_constant_decl :: proc(c: ^Checker_Context, e: ^Constant, type, init: ^Ast_
 		t := check_type(c, type);
 		if !is_const_type(t) {
 			check_error(type.pos, "invalid constant type");
-			e.type = t_invalid;
+			e.type = &btype[.invalid];
 			return;
 		}
 		e.type = t;
@@ -494,7 +521,7 @@ check_variable_decl :: proc(c: ^Checker_Context, e: ^Variable, lhs: []^Variable,
 
 	if init == nil {
 		if type_expr == nil {
-			e.type = t_invalid;
+			e.type = &btype[.invalid];
 		}
 		return;
 	}
@@ -517,9 +544,9 @@ check_variable_decl :: proc(c: ^Checker_Context, e: ^Variable, lhs: []^Variable,
 }
 
 check_init_variable :: proc(c: ^Checker_Context, lhs: ^Variable, x: ^Operand, ctx: string) -> ^Type {
-	if x.mode == .Invalid || x.type == t_invalid || lhs.type == t_invalid {
+	if x.mode == .Invalid || x.type == &btype[.invalid] || lhs.type == &btype[.invalid] {
 		if lhs.type == nil {
-			lhs.type = t_invalid;
+			lhs.type = &btype[.invalid];
 		}
 		return nil;
 	}
@@ -527,12 +554,12 @@ check_init_variable :: proc(c: ^Checker_Context, lhs: ^Variable, x: ^Operand, ct
 	if lhs.type == nil {
 		type := x.type;
 		if type_is_untyped(type) {
-			if type == t_untyped_nil {
+			if type == &btype[.untyped_nil] {
 				check_error(x.expr.pos, "use of untyped nil in {}", ctx);
-				lhs.type = t_invalid;
+				lhs.type = &btype[.invalid];
 				return nil;
 			} 
-			type = default_type(type);
+			// type = default_type(type);
 		}
 		lhs.type = type;
 	}
@@ -556,7 +583,7 @@ check_type_decl :: proc(c: ^Checker_Context, e: ^Type_Name, type_expr: ^Ast_Expr
 	defer check_valid_type(c, e.type, nil);
 
 	if is_alias {
-		e.type = t_invalid;
+		e.type = &btype[.invalid];
 		e.type = check_type(c, type_expr);
 	} else {
 		named := new(Named);
@@ -574,7 +601,7 @@ check_procedure_decl :: proc(c: ^Checker_Context, e: ^Procedure, d: ^Decl_Info) 
 	proc_decl := d.proc_decl;
 	check_proc_type(c, sig, proc_decl.type);
 
-	if proc_decl.body != nil {
+	if proc_decl.body != nil && (c.scope.kind != .Type && c.scope.kind != .Procedure) {
 		info := Proc_Info{
 			decl = d,
 			type = sig,
@@ -585,11 +612,10 @@ check_procedure_decl :: proc(c: ^Checker_Context, e: ^Procedure, d: ^Decl_Info) 
 	}
 }
 
-check_proc_body :: proc(c: ^Checker_Context, e: ^Entity, d: ^Decl_Info) {
+check_proc_body :: proc(c: ^Checker_Context, e: ^Procedure, d: ^Decl_Info) {
 	push_entity_path(c);
 	defer pop_entity_path(c);
 
-	fmt.eprintln("check_proc_body", e.name);
 	check_stmt_list(c, nil, d.proc_decl.body.stmts);
 }
 
@@ -618,7 +644,7 @@ check_valid_type :: proc(c: ^Checker_Context, type: ^Type, path: ^[dynamic]^Enti
 			return .Valid;
 		}
 
-		if t.underlying == t_invalid {
+		if t.underlying == &btype[.invalid] {
 			t.state = .Invalid;
 			return .Invalid;
 		}
@@ -655,7 +681,7 @@ check_valid_type :: proc(c: ^Checker_Context, type: ^Type, path: ^[dynamic]^Enti
 					}
 					check_cycle_error(c, spath);
 					t.state = .Invalid;
-					t.underlying = t_invalid;
+					t.underlying = &btype[.invalid];
 					return t.state;
 				}
 			}	
@@ -664,4 +690,132 @@ check_valid_type :: proc(c: ^Checker_Context, type: ^Type, path: ^[dynamic]^Enti
 	}
 
 	return .Valid;
+}
+
+
+
+check_decl_stmt_out_of_order :: proc(c: ^Checker_Context, decl: ^Ast_Decl) {
+	switch d in decl.variant {
+	case ^Ast_Bad_Decl:
+		// Ignore
+
+	case ^Ast_Gen_Decl:
+		spec_loop: for spec in d.specs {
+			switch s in spec.variant {
+			case ^Ast_Import_Spec:
+				check_error(s.pos, "import declarations are not allowed within a procedure");
+				break spec_loop;
+
+			case ^Ast_Value_Spec:
+				#partial switch s.keyword.kind {
+				case .Const:
+					for name, i in s.names {
+						e := new_constant(name.pos, c.pkg, name.name, nil, i64(0));
+
+						init: ^Ast_Expr = nil;
+						if i < len(s.values) {
+							init = s.values[i];
+						}
+						e.decl = new_clone(Decl_Info{
+							parent = c.decl,
+							scope = c.scope,
+							type_expr = s.type,
+							init_expr = init,
+						});
+						append(&c.scope.delayed, e);
+
+						declare_entity(c, c.scope, name, e);
+					}
+					check_arity_match(c, s);
+
+				case .Var:
+					// Handled later in order
+				case:
+					check_error(decl.pos, "invalid token: {}", s.keyword.kind);
+				}
+
+			case ^Ast_Type_Spec:
+				e := new_type_name(s.name.pos, c.pkg, s.name.name, nil);
+				declare_entity(c, c.scope, s.name, e);
+
+				e.decl = new_clone(Decl_Info{
+					parent = c.decl,
+					scope = c.scope,
+					type_expr = s.type,
+					is_alias = pos_is_valid(s.assign),
+				});
+				append(&c.scope.delayed, e);
+
+			case ^Ast_Foreign_Spec:
+				check_error(decl.pos, "TODO {:T}", s);
+			}
+		}
+
+	case ^Ast_Proc_Decl:
+		name := d.name.name;
+		e := new_procedure(d.name.pos, c.pkg, name, nil);
+		declare_entity(c, c.scope, d.name, e);
+		e.decl = new_clone(Decl_Info{
+			scope = c.scope,
+			proc_decl = d,
+		});
+		append(&c.scope.delayed, e);
+
+	case:
+		check_error(decl.pos, "invalid AST, unknown Ast_Decl {:T}", d);
+	}
+}
+
+check_decl_stmt_in_order :: proc(c: ^Checker_Context, decl: ^Ast_Decl) {
+	switch d in decl.variant {
+	case ^Ast_Bad_Decl:
+		// Ignore
+
+	case ^Ast_Gen_Decl:
+		spec_loop: for spec in d.specs {
+			switch s in spec.variant {
+			case ^Ast_Import_Spec:
+				// ignore
+
+			case ^Ast_Value_Spec:
+				if s.keyword.kind == .Var {
+					variables := make([]^Variable, len(s.names));
+					for name, i in s.names {
+						variables[i] = new_variable(name.pos, c.pkg, name.name, nil);
+					}
+
+					for v, i in variables {
+						lhs: []^Variable = nil;
+						init: ^Ast_Expr = nil;
+
+						if len(s.values) == 1 {
+							lhs = variables;
+							init = s.values[0];
+						} else {
+							// sanity check
+							if i < len(s.values) {
+								init = s.values[i];
+							}
+						}
+
+						check_variable_decl(c, v, lhs, s.type, init);
+						if len(s.values) == 1 {
+							break;
+						}
+					}
+
+					check_arity_match(c, s);
+
+					for name, i in s.names {
+						declare_entity(c, c.scope, name, variables[i]);
+					}
+				}
+
+			case ^Ast_Type_Spec:
+			case ^Ast_Foreign_Spec:
+			}
+		}
+
+	case ^Ast_Proc_Decl:
+	}
 }

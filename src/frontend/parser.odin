@@ -25,7 +25,7 @@ Parser :: struct {
 
 MAX_SYNC_COUNT :: 10;
 
-Parse_Spec_Proc :: #type proc(p: ^Parser, keyword: Token, index: int, check_semicolon: bool) -> ^Ast_Spec;
+Parse_Spec_Proc :: #type proc(p: ^Parser, keyword: Token, check_semicolon: bool) -> ^Ast_Spec;
 
 parser_error :: proc(p: ^Parser, pos: Pos, msg: string, args: ..any) {
 	if p.err != nil {
@@ -319,6 +319,10 @@ parse_decl :: proc(p: ^Parser, sync: ^[Token_Kind]bool) -> ^Ast_Decl {
 		f = parse_value_spec;
 	case .Type:
 		f = parse_type_spec;
+	case .Export:
+		f = parse_export_spec;
+	case .Foreign:
+		return parse_foreign_decl(p, sync);
 	case .Proc:
 		return parse_proc_decl(p);
 	case:
@@ -343,13 +347,13 @@ parse_gen_decl :: proc(p: ^Parser, keyword: Token_Kind, f: Parse_Spec_Proc, allo
 	if allow_grouping && p.curr_tok.kind == .Open_Paren {
 		open = expect_token(p, .Open_Paren);
 		for i := 0; p.curr_tok.kind != .Close_Paren && p.curr_tok.kind != .EOF; i += 1 {
-			append(&specs, f(p, tok, i, true));
+			append(&specs, f(p, tok, true));
 		}
 		close = expect_token(p, .Close_Paren);
 		expect_semicolon(p);
 	} else {
 		reserve(&specs, 1);
-		append(&specs, f(p, tok, 0, allow_grouping));
+		append(&specs, f(p, tok, allow_grouping));
 	}
 
 	decl := new_node(p, Ast_Gen_Decl);
@@ -365,7 +369,7 @@ parse_gen_decl :: proc(p: ^Parser, keyword: Token_Kind, f: Parse_Spec_Proc, allo
 }
 
 
-parse_import_spec :: proc(p: ^Parser, keyword: Token, _: int, _: bool) -> ^Ast_Spec {
+parse_import_spec :: proc(p: ^Parser, keyword: Token, _: bool) -> ^Ast_Spec {
 	name: ^Ast_Ident;
 	if p.curr_tok.kind == .Ident {
 		name = parse_ident(p);
@@ -396,7 +400,7 @@ parse_import_spec :: proc(p: ^Parser, keyword: Token, _: int, _: bool) -> ^Ast_S
 	return spec;
 }
 
-parse_value_spec :: proc(p: ^Parser, keyword: Token, index: int, check_semicolon := true) -> ^Ast_Spec {
+parse_value_spec :: proc(p: ^Parser, keyword: Token, check_semicolon := true) -> ^Ast_Spec {
 	start := p.curr_tok;
 	pos := p.curr_tok.pos;
 	names := parse_ident_list(p);
@@ -440,7 +444,7 @@ parse_value_spec :: proc(p: ^Parser, keyword: Token, index: int, check_semicolon
 	return spec;
 }
 
-parse_type_spec :: proc(p: ^Parser, keyword: Token, index: int, _: bool) -> ^Ast_Spec {
+parse_type_spec :: proc(p: ^Parser, keyword: Token, _: bool) -> ^Ast_Spec {
 	start := p.curr_tok;
 	pos := p.curr_tok.pos;
 
@@ -457,6 +461,117 @@ parse_type_spec :: proc(p: ^Parser, keyword: Token, index: int, _: bool) -> ^Ast
 	expect_semicolon(p);
 
 	return spec;
+}
+
+parse_export_spec :: proc(p: ^Parser, keyword: Token, _: bool) -> ^Ast_Spec {
+	start := p.curr_tok;
+	pos := p.curr_tok.pos;
+
+	decl := parse_decl(p, &_decl_start_map);
+	switch d in decl.variant {
+	case ^Ast_Bad_Decl:
+		// ignore
+	case ^Ast_Gen_Decl:
+		#partial switch d.tok.kind {
+		case .Var:
+			// Okay
+
+		case .Import, .Type, .Const:
+			parser_error(p, decl.pos, "unexpected {} declaration in 'export' declaration", d.tok.text);
+
+		case .Export:
+			parser_error(p, decl.pos, "unexpected nested 'export' declaration");
+
+		}
+	case ^Ast_Proc_Decl:
+		// Okay
+	case ^Ast_Foreign_Decl:
+		parser_error(p, decl.pos, "unexpected foreign declaration in 'export' declaration");
+	}
+
+	spec := new_node(p, Ast_Export_Spec);
+	spec.pos = pos;
+	spec.end = decl.end;
+	spec.decl = decl;
+
+	return spec;
+}
+
+
+parse_nested_proc_decl :: proc(p: ^Parser, sync: ^[Token_Kind]bool) -> ^Ast_Decl {
+	decl := parse_decl(p, sync);
+	switch d in decl.variant {
+	case ^Ast_Bad_Decl:
+		// Ignore
+	case ^Ast_Gen_Decl:
+		#partial switch d.tok.kind {
+		case .Import: parser_error(p, d.pos, "unexpected 'import' declaration within a foreign declaration");
+		case .Type:   parser_error(p, d.pos, "unexpected 'type' declaration within a foreign declaration");
+		case .Const:  parser_error(p, d.pos, "unexpected 'const' declaration within a foreign declaration");
+		case .Var:
+			var_loop: for spec in d.specs {
+				switch s in spec.variant {
+				case ^Ast_Import_Spec, ^Ast_Type_Spec, ^Ast_Export_Spec:
+					// Ignore
+				case ^Ast_Value_Spec:
+					if s.keyword.kind != d.tok.kind {
+						continue var_loop;
+					}
+					if len(s.values) > 0 {
+						parser_error(p, d.pos, "foreign var declarations must not have initialization");
+						continue var_loop;
+					}
+				}
+			}
+		}
+	case ^Ast_Proc_Decl:
+		if d.body != nil {
+			parser_error(p, d.pos, "foreign procedure not expecting a body");
+		}
+
+	case ^Ast_Foreign_Decl:
+		parser_error(p, d.pos, "unexpected nested foreign declaration");
+	}
+
+	return decl;
+}
+
+parse_foreign_decl :: proc(p: ^Parser, sync: ^[Token_Kind]bool) -> ^Ast_Decl {
+	tok := expect_token(p, .Foreign);
+	pos := p.curr_tok.pos;
+
+	lib := expect_token(p, .String);
+
+	open, close: Token;
+	decls := make([dynamic]^Ast_Decl, 0, 0);
+
+	if p.curr_tok.kind == .Open_Paren {
+		open = expect_token(p, .Open_Paren);
+		for i := 0; p.curr_tok.kind != .Close_Paren && p.curr_tok.kind != .EOF; i += 1 {
+			decl := parse_nested_proc_decl(p, sync);
+			append(&decls, decl);
+		}
+		close = expect_token(p, .Close_Paren);
+		expect_semicolon(p);
+	} else {
+		decl := parse_nested_proc_decl(p, sync);
+		reserve(&decls, 1);
+		append(&decls, decl);
+	}
+
+
+	decl := new_node(p, Ast_Foreign_Decl);
+	decl.pos = tok.pos;
+	decl.end = end_pos(close) if pos_is_valid(close.pos) else decls[len(decls)-1].end;
+
+	decl.tok = tok;
+	decl.lib = lib;
+
+	decl.open_paren = open.pos;
+	decl.decls = decls[:];
+	decl.close_paren = close.pos;
+
+	return decl;
 }
 
 parse_proc_decl :: proc(p: ^Parser) -> ^Ast_Proc_Decl {
@@ -967,7 +1082,7 @@ make_ident_list :: proc(p: ^Parser, list: []^Ast_Expr) -> []^Ast_Ident {
 			ident.name = "_";
 		}
 		idents[i] = ident;
-		
+
 	}
 	return idents;
 }
@@ -977,6 +1092,7 @@ parse_parameters_list :: proc(p: ^Parser) -> []^Ast_Field {
 	list: [dynamic]^Ast_Expr;
 	for {
 		item := parse_var_type(p);
+		append(&list, item);
 		if p.curr_tok.kind != .Comma {
 			break;
 		}
@@ -986,15 +1102,15 @@ parse_parameters_list :: proc(p: ^Parser) -> []^Ast_Field {
 		}
 	}
 
-
 	if type := parse_try_var_type(p); type != nil {
 		params: [dynamic]^Ast_Field;
 
 		idents := make_ident_list(p, list[:]);
 		field := new_node(p, Ast_Field);
-		field.pos = idents[len(idents)-1].pos;
+		field.pos = list[len(list)-1].pos;
 		field.end = type.end;
 		field.names = idents;
+		field.type = type;
 		append(&params, field);
 
 		if !parser_at_comma(p, "parameter list", .Close_Paren) {
@@ -1009,6 +1125,7 @@ parse_parameters_list :: proc(p: ^Parser) -> []^Ast_Field {
 			field.pos = idents[len(idents)-1].pos;
 			field.end = type.end;
 			field.names = idents;
+			field.type = type;
 			append(&params, field);
 
 			if !parser_at_comma(p, "parameter list", .Close_Paren) {

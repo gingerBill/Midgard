@@ -52,7 +52,7 @@ Ast_Expr :: struct {
 		^Ast_Index_Expr,
 		^Ast_Slice_Expr,
 		^Ast_Key_Value_Expr,
-		
+
 		^Ast_Pointer_Type,
 		^Ast_Array_Type,
 		^Ast_Struct_Type,
@@ -87,6 +87,7 @@ Ast_Decl :: struct {
 		^Ast_Bad_Decl,
 		^Ast_Gen_Decl,
 		^Ast_Proc_Decl,
+		^Ast_Foreign_Decl,
 	},
 }
 
@@ -98,7 +99,7 @@ Ast_Spec :: struct {
 		^Ast_Import_Spec,
 		^Ast_Value_Spec,
 		^Ast_Type_Spec,
-		^Ast_Foreign_Spec,
+		^Ast_Export_Spec,
 	},
 }
 
@@ -123,6 +124,15 @@ Ast_Proc_Decl :: struct {
 	body: ^Ast_Block_Stmt,
 }
 
+Ast_Foreign_Decl :: struct {
+	using node:  Ast_Decl,
+	tok:         Token,
+	lib:         Token,
+	open_paren:  Pos,
+	decls:       []^Ast_Decl,
+	close_paren: Pos,
+}
+
 Ast_Import_Spec :: struct {
 	using node: Ast_Spec,
 	name: ^Ast_Ident,
@@ -144,10 +154,11 @@ Ast_Type_Spec :: struct {
 	type:   ^Ast_Expr,
 }
 
-Ast_Foreign_Spec :: struct {
+Ast_Export_Spec :: struct {
 	using node: Ast_Spec,
-	decls: []^Ast_Decl, 
+	decl: ^Ast_Decl,
 }
+
 
 
 // Statements

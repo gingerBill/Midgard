@@ -182,8 +182,18 @@ new_pointer :: proc(elem: ^Type) -> ^Pointer {
 	return ptr;
 }
 
+tuple_len :: proc(t: ^Tuple) -> int {
+	if t == nil {
+		return 0;
+	}
+	return len(t.vars);
+}
+
 
 type_underlying :: proc(t: ^Type) -> ^Type {
+	if t == nil {
+		return nil;
+	}
 	if tname, ok := t.variant.(^Named); ok {
 		return tname.underlying;
 	}
@@ -364,7 +374,7 @@ type_is_numeric :: proc(t: ^Type) -> bool {
 type_is_integer :: proc(t: ^Type) -> bool {
 	bt := type_underlying(t);
 	if b, ok := bt.variant.(^Basic); ok {
-		return .Integer in b.flags;		
+		return .Integer in b.flags;
 	}
 	return false;
 }
@@ -372,7 +382,7 @@ type_is_integer :: proc(t: ^Type) -> bool {
 type_is_unsigned :: proc(t: ^Type) -> bool {
 	bt := type_underlying(t);
 	if b, ok := bt.variant.(^Basic); ok {
-		return .Unsigned in b.flags;		
+		return .Unsigned in b.flags;
 	}
 	return false;
 }
@@ -380,21 +390,21 @@ type_is_unsigned :: proc(t: ^Type) -> bool {
 type_is_boolean :: proc(t: ^Type) -> bool {
 	bt := type_underlying(t);
 	if b, ok := bt.variant.(^Basic); ok {
-		return .Boolean in b.flags;		
+		return .Boolean in b.flags;
 	}
 	return false;
 }
 type_is_float :: proc(t: ^Type) -> bool {
 	bt := type_underlying(t);
 	if b, ok := bt.variant.(^Basic); ok {
-		return .Float in b.flags;		
+		return .Float in b.flags;
 	}
 	return false;
 }
 type_is_string :: proc(t: ^Type) -> bool {
 	bt := type_underlying(t);
 	if b, ok := bt.variant.(^Basic); ok {
-		return .String in b.flags;		
+		return .String in b.flags;
 	}
 	return false;
 }
@@ -402,10 +412,10 @@ type_is_pointer :: proc(t: ^Type) -> bool {
 	bt := type_underlying(t);
 	#partial switch b in bt.variant {
 	case ^Basic:
-		return .Pointer in b.flags;	
+		return .Pointer in b.flags;
 	case ^Pointer:
 		return true;
-	} 
+	}
 	return false;
 }
 
@@ -413,8 +423,8 @@ is_const_type :: proc(t: ^Type) -> bool {
 	bt := type_underlying(t);
 	#partial switch b in bt.variant {
 	case ^Basic:
-		return b.flags & Basic_Flags_Constant_Type != nil;	
-	} 
+		return b.flags & Basic_Flags_Constant_Type != nil;
+	}
 	return false;
 }
 

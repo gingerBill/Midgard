@@ -21,34 +21,42 @@ type My_Type struct {
 }
 
 
-proc the_thing() {
-	var x isize = 123
-	type Foo struct {
-		x i32
-		y f32
-		z, w, a bool
-	}
-
-	var cond = true
-
-	if cond {
-		for var i = 0; i < 10; i += 1 {
-
-		}
-	}
-
-	proc foo() {
-		var cond = false
-		if cond {
-
-		}
-	}
+proc main() {
+	print()
+	print2(1234)
+	print()
+	print()
 }
 
+foreign "env" proc print()
+foreign "env" proc print2(x f32)
+// foreign "env" proc print3(i32)
 
 
-proc another0() {}
-proc another1() {}
-proc another2() {}
-proc another3() {}
-proc another4() {}
+
+// proc the_thing() {
+// 	var x isize = 123
+// 	type Foo struct {
+// 		x i32
+// 		y f32
+// 		z, w, a bool
+// 	}
+
+// 	var cond = true
+
+// 	print()
+
+// 	if cond {
+// 		for var i = 0; i < 10; i += 1 {
+
+// 		}
+// 	}
+
+// 	proc foo() {
+// 		var cond = false
+// 		if cond {
+
+// 		}
+// 	}
+// }
+

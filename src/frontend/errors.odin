@@ -7,6 +7,8 @@ import "core:sync"
 Error_Handler :: #type proc(pos: Pos, fmt: string, args: ..any);
 
 error_mutex: sync.Mutex;
+total_error_count: int;
+
 init_error_system :: proc() {
 	sync.mutex_init(&error_mutex);
 }
@@ -20,6 +22,7 @@ check_error :: proc(pos: Pos, msg: string, args: ..any) {
 
 
 default_error_handler :: proc(pos: Pos, msg: string, args: ..any) {
+	total_error_count += 1;
 	fullpath := "";
 	if pos.file != nil {
 		fullpath = pos.file.fullpath;
@@ -149,12 +152,16 @@ write_expr :: proc(b: ^strings.Builder, expr: ^Ast_Expr) {
 	write_string :: strings.write_string;
 
 	switch x in expr.variant {
-	case: 
+	case:
 		write_string(b, "(bad expr)");
-	case ^Ast_Bad_Expr, ^Ast_Key_Value_Expr,
-	     ^Ast_Field_List,
-	     ^Ast_Field:  
+	case ^Ast_Bad_Expr:
 		write_string(b, "(bad expr)");
+	case ^Ast_Key_Value_Expr:
+		write_string(b, "(bad expr - key value)");
+	case ^Ast_Field_List:
+		write_string(b, "(bad expr - field list)");
+	case ^Ast_Field:
+		write_string(b, "(bad expr - field)");
 
 	case ^Ast_Ident:
 		write_string(b, x.name);
@@ -211,7 +218,7 @@ write_expr :: proc(b: ^strings.Builder, expr: ^Ast_Expr) {
 		write_expr(b, x.index);
 		write_byte(b, ']');
 
-	case ^Ast_Slice_Expr:  
+	case ^Ast_Slice_Expr:
 		write_expr(b, x.x);
 		write_byte(b, '[');
 		if x.low != nil {
@@ -228,7 +235,7 @@ write_expr :: proc(b: ^strings.Builder, expr: ^Ast_Expr) {
 		write_byte(b, '^');
 		write_expr(b, x.elem);
 
-	case ^Ast_Array_Type:  
+	case ^Ast_Array_Type:
 		write_byte(b, '[');
 		if x.len != nil {
 			write_expr(b, x.len);
@@ -236,11 +243,11 @@ write_expr :: proc(b: ^strings.Builder, expr: ^Ast_Expr) {
 		write_byte(b, ']');
 		write_expr(b, x.elem);
 
-	case ^Ast_Struct_Type: 
+	case ^Ast_Struct_Type:
 		write_string(b, "struct{");
 		write_field_list(b, x.fields, "; ");
 
-	case ^Ast_Proc_Type:   
+	case ^Ast_Proc_Type:
 		write_string(b, "proc");
 		write_signature_expr(b, x);
 	}
@@ -307,7 +314,7 @@ write_type :: proc(b: ^strings.Builder, type: ^Type) {
 		if len(t.vars) == 1 && t.vars[0].name == "" {
 			write_type(b, t.vars[0].type);
 			return;
-		} 
+		}
 		if parens do write_byte(b, '(');
 		for var, i in t.vars {
 			if i > 0 {

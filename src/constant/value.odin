@@ -4,7 +4,7 @@ package frontend
 // import "core:strings"
 // import "core:unicode/utf8"
 
-Value :: union{bool, string, i64, f64};
+Value :: union{bool, string, i128, f64};
 
 Op :: enum u8 {
 	Invalid,
@@ -38,16 +38,35 @@ as_int :: proc(value: Value) -> (res: Value, ok: bool) {
 		return;
 	case string:
 		return;
-	case i64:
-		res = i64(v);
+	case i128:
+		res = i128(v);
 		ok = true;
 	case f64:
-		res = i64(v);
+		res = i128(v);
 		ok = true;
 	}
 
 	return;
 }
+
+
+as_float :: proc(value: Value) -> (res: Value, ok: bool) {
+	switch v in value {
+	case bool:
+		return;
+	case string:
+		return;
+	case i128:
+		res = f64(v);
+		ok = true;
+	case f64:
+		res = f64(v);
+		ok = true;
+	}
+
+	return;
+}
+
 
 as_i64 :: proc(value: Value) -> (res: i64, ok: bool) {
 	switch v in value {
@@ -55,7 +74,7 @@ as_i64 :: proc(value: Value) -> (res: i64, ok: bool) {
 		return;
 	case string:
 		return;
-	case i64:
+	case i128:
 		res = i64(v);
 		ok = true;
 	case f64:
@@ -68,12 +87,9 @@ as_i64 :: proc(value: Value) -> (res: i64, ok: bool) {
 
 
 as_bool :: proc(value: Value) -> (res: Value, ok: bool) {
-	switch v in value {
+	#partial switch v in value {
 	case bool:
 		return v, true;
-	case string:
-	case i64:
-	case f64:
 	}
 
 	return;
@@ -86,7 +102,7 @@ sign :: proc(value: Value) -> int {
 		return 0;
 	case string:
 		return 0;
-	case i64:
+	case i128:
 		if v < 0 {
 			return -1;
 		} else if v > 0 {
@@ -111,7 +127,7 @@ order :: proc(value: Value) -> int {
 	switch v in value {
 	case bool, string:
 		return 1;
-	case i64:
+	case i128:
 		return 2;
 	case f64:
 		return 3;
@@ -129,14 +145,14 @@ match :: proc(x, y: Value) -> (Value, Value) {
 	switch a in x {
 	case bool, string:
 		return x, y;
-	case i64:
+	case i128:
 		#partial switch b in y {
-		case i64: return x, y;
-		case f64: return x, i64(b);
+		case i128: return x, y;
+		case f64: return x, i128(b);
 		}
 	case f64:
 		#partial switch b in y {
-		case i64: return x, f64(b);
+		case i128: return x, f64(b);
 		case f64: return x, y;
 		}
 	}
@@ -150,7 +166,7 @@ unary_op :: proc(op: Op, x: Value) -> Value {
 		#partial switch op {
 		case .Not: return !x;
 		}
-	case i64:
+	case i128:
 		#partial switch op {
 		case .Xor: return ~x;
 		}
@@ -177,8 +193,8 @@ binary_op :: proc(x_: Value, op: Op, y_: Value) -> Value {
 		case .Cmp_Eq:  return x == y;
 		case .Not_Eq:  return x != y;
 		}
-	case i64:
-		y := y.(i64);
+	case i128:
+		y := y.(i128);
 		#partial switch op {
 		case .Add:     return x + y;
 		case .Sub:     return x - y;

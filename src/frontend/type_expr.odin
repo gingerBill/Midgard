@@ -20,6 +20,7 @@ check_ident :: proc(c: ^Checker_Context, x: ^Operand, ident: ^Ast_Ident, def: ^N
 		}
 		return;
 	}
+	ident.entity = e;
 
 	type := e.type;
 	if _, got_type := e.variant.(^Type_Name); type == nil || got_type && want_type {
@@ -27,6 +28,7 @@ check_ident :: proc(c: ^Checker_Context, x: ^Operand, ident: ^Ast_Ident, def: ^N
 		type = e.type;
 	}
 	assert(type != nil);
+
 
 
 	switch e in e.variant {
@@ -230,7 +232,7 @@ collect_params :: proc(c: ^Checker_Context, scope: ^Scope, list: ^Ast_Field_List
 
 	named, anonymous: bool;
 	for field, i in list.list {
-		check_error(field.pos, "{}", field);
+		assert(field.type != nil);
 		type := check_type(c, field.type);
 		if len(field.names) > 0 {
 			for name in field.names {
@@ -254,5 +256,5 @@ collect_params :: proc(c: ^Checker_Context, scope: ^Scope, list: ^Ast_Field_List
 		check_error(list.pos, "invalid AST containing both named and anonymous parameters");
 	}
 
-	return params[:];	
+	return params[:];
 }

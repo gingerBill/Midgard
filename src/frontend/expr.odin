@@ -8,8 +8,10 @@ import "core:reflect"
 constant_from_token :: proc(tok: Token, allocator := context.allocator) -> constant.Value {
 	#partial switch tok.kind {
 	case .Integer:
-		if val, ok := strconv.parse_i64_maybe_prefixed(tok.text); ok {
-			return val;
+		if val, ok := strconv.parse_i64(tok.text); ok {
+			return i128(val);
+		} else if val, ok := strconv.parse_u64(tok.text); ok {
+			return i128(val);
 		}
 	case .Float:
 		if val, ok := strconv.parse_f64(tok.text); ok {
@@ -17,7 +19,7 @@ constant_from_token :: proc(tok: Token, allocator := context.allocator) -> const
 		}
 	case .Rune:
 		if r, _, _, ok := strconv.unquote_char(tok.text, '\''); ok {
-			return i64(r);
+			return i128(r);
 		}
 	case .String:
 		if r, allocated, ok := strconv.unquote_string(tok.text, allocator); ok {
@@ -70,6 +72,7 @@ add_type_and_value :: proc(c: ^Checker_Context, e: ^Ast_Expr, mode: Addressing_M
 Expr_Kind :: enum {
 	Expr,
 	Stmt,
+	Conv,
 }
 
 
@@ -212,9 +215,7 @@ check_expr_internal :: proc(c: ^Checker_Context, x: ^Operand, expr: ^Ast_Expr, t
 		}
 
 	case ^Ast_Call_Expr:
-		check_error(expr.pos, "TODO(bill): ^Ast_Call_Expr");
-		return expr_err(x, expr);
-
+		return check_call(c, x, e);
 
 	case ^Ast_Comp_Lit:
 		check_error(expr.pos, "TODO(bill): ^Ast_Comp_Lit");
@@ -266,8 +267,8 @@ check_comparison :: proc(c: ^Checker_Context, x, y: ^Operand, op: Token_Kind) {
 		ok := false;
 		#partial switch op {
 		case .Cmp_Eq, .Not_Eq:
-			ok = (type_is_comparable(x.type) && type_is_comparable(y.type)) || 
-			     (is_operand_nil(x) && type_has_nil(y.type)) || 
+			ok = (type_is_comparable(x.type) && type_is_comparable(y.type)) ||
+			     (is_operand_nil(x) && type_has_nil(y.type)) ||
 			     (is_operand_nil(y) && type_has_nil(x.type));
 
 		case .Lt, .Lt_Eq, .Gt, .Gt_Eq:
@@ -308,7 +309,7 @@ check_op :: proc(c: ^Checker_Context, preds: [Token_Kind]Op_Predicate, x: ^Opera
 			return false;
 		}
 		return true;
-	} 
+	}
 	check_error(x.expr.pos, "invalid AST: unknown operator {}", op);
 	return false;
 }
@@ -449,7 +450,7 @@ representable_as_constant :: proc(c: ^Checker_Context, value: constant.Value, t:
 			rounded^ = x;
 		}
 
-		if x, ok := x.(i64); ok {
+		if x, ok := x.(i128); ok {
 			#partial switch t.kind {
 			case .i8:
 				s :: 8;
@@ -468,19 +469,19 @@ representable_as_constant :: proc(c: ^Checker_Context, value: constant.Value, t:
 
 			case .u8:
 				s :: 8;
-				return 0 <= x && x <= 1<<s-1; 
+				return 0 <= x && x <= 1<<s-1;
 			case .u16:
 				s :: 16;
-				return 0 <= x && x <= 1<<s-1; 
+				return 0 <= x && x <= 1<<s-1;
 			case .u32:
 				s :: 32;
-				return 0 <= x && x <= 1<<s-1; 
+				return 0 <= x && x <= 1<<s-1;
 			case .u64:
 				return 0 <= x;
 
 			case .usize:
 				s := i64(SIZES.word_size*8);
-				return 0 <= x && x <= 1<<u64(s)-1; 
+				return 0 <= x && x <= 1<<u64(s)-1;
 
 			case:
 				unreachable();
@@ -490,7 +491,14 @@ representable_as_constant :: proc(c: ^Checker_Context, value: constant.Value, t:
 		return true;
 
 	case type_is_float(t):
-		// TODO(bill):
+		x, ok := constant.as_float(value);
+		if !ok {
+			return false;
+		}
+		if rounded != nil {
+			rounded^ = x;
+		}
+		return true;
 
 	case type_is_boolean(t):
 		_, ok := constant.as_bool(value);
@@ -522,4 +530,30 @@ check_representable_as_constant :: proc(c: ^Checker_Context, x: ^Operand, type: 
 			return;
 		}
 	}
+}
+
+is_convertible_to :: proc(c: ^Checker_Context, x: ^Operand, T: ^Type) -> bool {
+	panic("TODO: is_convertible_to");
+	return false;
+}
+
+check_conversion :: proc(c: ^Checker_Context, x: ^Operand, T: ^Type) -> bool {
+	ok := false;
+	switch {
+	case x.mode == .Constant && is_const_type(T):
+		t := type_underlying(T).variant.(^Basic);
+		ok = representable_as_constant(c, x.value, t, &x.value);
+	case is_convertible_to(c, x, T):
+		x.mode = .Value;
+		ok = true;
+	}
+
+	if !ok {
+		check_error(x.expr.pos, "cannot convert {} to {}", x, T);
+		x.mode = .Invalid;
+		return false;
+	}
+
+	x.type = T;
+	return true;
 }

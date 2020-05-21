@@ -702,7 +702,7 @@ signature :: proc(a: ^Assembler, params: []Val_Type, result: Val_Type) -> ^Signa
 
 	sig: Signature;
 	sig.param_len = min(u8(len(params)), len(sig.params));
-	copy(sig.params[:],  params);
+	copy(sig.params[:], params);
 
 	sig.result_len = 1 if result != .void else 0;
 	sig.results[0] = result;
@@ -871,7 +871,7 @@ generate_assembly :: proc(using a: ^Assembler) {
 				panic("TODO: Import Mem");
 			case .Global:
 				panic("TODO: Import Global");
-				
+
 			}
 		}
 
@@ -880,7 +880,7 @@ generate_assembly :: proc(using a: ^Assembler) {
 		for imp in imports {
 			emit_name(e, imp.module);
 			emit_name(e, imp.name);
-			emit_byte(e, byte(imp.kind)); 
+			emit_byte(e, byte(imp.kind));
 			switch imp.kind {
 			case .Func:
 				sig := imp.type.(^Signature);
@@ -888,7 +888,7 @@ generate_assembly :: proc(using a: ^Assembler) {
 			case .Table:
 			case .Mem:
 			case .Global:
-				
+
 			}
 		}
 	}
@@ -989,7 +989,7 @@ generate_assembly :: proc(using a: ^Assembler) {
 			section_size += 1;
 			section_size += u32_byte_length(i);
 		}
-		
+
 
 		section_size += u32_byte_length32(exported_count);
 
@@ -999,7 +999,7 @@ generate_assembly :: proc(using a: ^Assembler) {
 			if f.kind != .Export do continue;
 
 			emit_name(e, f.name);
-			emit_byte(e, EXPORT_DESC_FUNC); 
+			emit_byte(e, EXPORT_DESC_FUNC);
 			emit_u32(e, func_index(a, f.name));
 		}
 		for mem, i in memories[:memories_len] {
@@ -1016,7 +1016,7 @@ generate_assembly :: proc(using a: ^Assembler) {
 			emit_byte(e, EXPORT_DESC_GLOBAL);
 			emit_u32(e, u32(i));
 		}
-		
+
 	}
 
 	{ // Code Section

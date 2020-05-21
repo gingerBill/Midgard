@@ -30,7 +30,7 @@ Entity :: struct {
 	colour: Entity_Colour,
 
 	link_name:       string,
-	foreign_library: ^Entity,
+	foreign_library: string,
 	flags:           Entity_Flags,
 
 	variant: union {

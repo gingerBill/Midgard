@@ -53,7 +53,7 @@ is_assignable_to :: proc(c: ^Checker_Context, x: ^Operand, T: ^Type) -> (ok: boo
 
 		case ^Pointer, ^Signature, ^Slice:
 			return is_operand_nil(x);
-		} 
+		}
 	}
 
 	return false;
@@ -147,7 +147,7 @@ check_assign_var :: proc(c: ^Checker_Context, lhs: ^Ast_Expr, x: ^Operand) -> ^T
 	}
 
 	if y.mode == .Variable {
-		// Okay		
+		// Okay
 	} else {
 		check_error(y.expr.pos, "cannot assign to {}", &y);
 		return nil;

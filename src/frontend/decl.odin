@@ -2,6 +2,7 @@ package frontend
 
 import "core:fmt"
 import "core:strings"
+import "core:strconv"
 
 Scope_Kind :: enum {
 	Normal,
@@ -84,7 +85,7 @@ scope_insert_with_name :: proc(s: ^Scope, e: ^Entity, name: string) -> ^Entity {
 		e.scope = s;
 	}
 	return nil;
-}	
+}
 
 scope_lookup_current :: proc(s: ^Scope, name: string) -> ^Entity {
 	if name == "" || name == "_" {
@@ -95,7 +96,7 @@ scope_lookup_current :: proc(s: ^Scope, name: string) -> ^Entity {
 
 scope_lookup :: proc(scope: ^Scope, name: string) -> (found_scope: ^Scope, found_entity: ^Entity) {
 	gone_thru_boundary := false;
-	
+
 	for s := scope; s != nil; s = s.parent {
 		if e := s.elems[name]; e != nil {
 			if gone_thru_boundary {
@@ -144,6 +145,7 @@ declare_entity :: proc(c: ^Checker_Context, scope: ^Scope, ident: ^Ast_Ident, e:
 	e.ident = ident;
 	e.pos = ident.pos;
 	ident.entity = e;
+	e.foreign_library = c.foreign_library;
 
 	if e.name != "_" {
 		if prev := scope_insert(scope, e); prev != nil {
@@ -203,7 +205,7 @@ collect_entities :: proc(c: ^Checker_Context, decls: []^Ast_Decl) {
 					#partial switch s.keyword.kind {
 					case .Const:
 						for name, i in s.names {
-							e := new_constant(name.pos, c.pkg, name.name, nil, i64(0));
+							e := new_constant(name.pos, c.pkg, name.name, nil, i128(0));
 
 							init: ^Ast_Expr = nil;
 							if i < len(s.values) {
@@ -267,8 +269,8 @@ collect_entities :: proc(c: ^Checker_Context, decls: []^Ast_Decl) {
 						is_alias = pos_is_valid(s.assign),
 					}));
 
-				case ^Ast_Foreign_Spec:
-					panic("TODO foreign declarations");
+				case ^Ast_Export_Spec:
+					// TODO
 				}
 			}
 
@@ -281,6 +283,21 @@ collect_entities :: proc(c: ^Checker_Context, decls: []^Ast_Decl) {
 				proc_decl = d,
 			});
 			append(&c.checker.entities, e);
+
+		case ^Ast_Foreign_Decl:
+			lib, allocated, ok := strconv.unquote_string(d.lib.text[1:len(d.lib.text)-1]);
+			if !ok || lib == "" {
+				check_error(d.tok.pos, "invalid foreign library string");
+				if allocated {
+					delete(lib);
+				}
+				lib = "";
+			}
+
+			prev_foreign_library := c.foreign_library;
+			defer c.foreign_library = prev_foreign_library;
+			c.foreign_library = lib;
+			collect_entities(c, d.decls);
 
 		case:
 			check_error(decl.pos, "invalid AST, unknown Ast_Decl {:T}", d);
@@ -381,7 +398,7 @@ check_entity_decl :: proc(c: ^Checker_Context, entity: ^Entity, def: ^Named) {
 
 	assert(entity != nil);
 
-	// NOTE(bill): Three possible states: 
+	// NOTE(bill): Three possible states:
 	// - Type unknown yet (white)
 	// - Type in the process of being inferred (grey)
 	// - Type fully inferred (black)
@@ -558,7 +575,7 @@ check_init_variable :: proc(c: ^Checker_Context, lhs: ^Variable, x: ^Operand, ct
 				check_error(x.expr.pos, "use of untyped nil in {}", ctx);
 				lhs.type = &btype[.invalid];
 				return nil;
-			} 
+			}
 			// type = default_type(type);
 		}
 		lhs.type = type;
@@ -573,7 +590,7 @@ check_init_variable :: proc(c: ^Checker_Context, lhs: ^Variable, x: ^Operand, ct
 }
 
 check_init_variables :: proc(c: ^Checker_Context, lhs: []^Variable, inits: []^Ast_Expr, pos: Pos) {
-	// TODO(bill): check_init_variables 
+	// TODO(bill): check_init_variables
 	// Tuple unpacking logic
 }
 
@@ -684,7 +701,7 @@ check_valid_type :: proc(c: ^Checker_Context, type: ^Type, path: ^[dynamic]^Enti
 					t.underlying = &btype[.invalid];
 					return t.state;
 				}
-			}	
+			}
 		}
 		return t.state;
 	}
@@ -706,11 +723,15 @@ check_decl_stmt_out_of_order :: proc(c: ^Checker_Context, decl: ^Ast_Decl) {
 				check_error(s.pos, "import declarations are not allowed within a procedure");
 				break spec_loop;
 
+			case ^Ast_Export_Spec:
+				check_error(s.pos, "export declarations are not allowed within a procedure");
+				break spec_loop;
+
 			case ^Ast_Value_Spec:
 				#partial switch s.keyword.kind {
 				case .Const:
 					for name, i in s.names {
-						e := new_constant(name.pos, c.pkg, name.name, nil, i64(0));
+						e := new_constant(name.pos, c.pkg, name.name, nil, i128(0));
 
 						init: ^Ast_Expr = nil;
 						if i < len(s.values) {
@@ -745,9 +766,6 @@ check_decl_stmt_out_of_order :: proc(c: ^Checker_Context, decl: ^Ast_Decl) {
 					is_alias = pos_is_valid(s.assign),
 				});
 				append(&c.scope.delayed, e);
-
-			case ^Ast_Foreign_Spec:
-				check_error(decl.pos, "TODO {:T}", s);
 			}
 		}
 
@@ -760,6 +778,10 @@ check_decl_stmt_out_of_order :: proc(c: ^Checker_Context, decl: ^Ast_Decl) {
 			proc_decl = d,
 		});
 		append(&c.scope.delayed, e);
+
+
+	case ^Ast_Foreign_Decl:
+		check_error(decl.pos, "TODO {:T}", d);
 
 	case:
 		check_error(decl.pos, "invalid AST, unknown Ast_Decl {:T}", d);
@@ -775,6 +797,9 @@ check_decl_stmt_in_order :: proc(c: ^Checker_Context, decl: ^Ast_Decl) {
 		spec_loop: for spec in d.specs {
 			switch s in spec.variant {
 			case ^Ast_Import_Spec:
+				// ignore
+
+			case ^Ast_Export_Spec:
 				// ignore
 
 			case ^Ast_Value_Spec:
@@ -812,10 +837,12 @@ check_decl_stmt_in_order :: proc(c: ^Checker_Context, decl: ^Ast_Decl) {
 				}
 
 			case ^Ast_Type_Spec:
-			case ^Ast_Foreign_Spec:
 			}
 		}
 
 	case ^Ast_Proc_Decl:
+
+	case ^Ast_Foreign_Decl:
+
 	}
 }

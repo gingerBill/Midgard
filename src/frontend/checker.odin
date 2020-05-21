@@ -45,6 +45,8 @@ Checker_Context :: struct {
 	scope: ^Scope,
 	decl:  ^Decl_Info,
 
+	foreign_library: string,
+
 	proc_name:      string,
 	curr_proc_decl: ^Decl_Info,
 	curr_proc_type: ^Signature,
@@ -242,7 +244,7 @@ check_pkgs :: proc(c: ^Checker, pkgs: []^Package) {
 				check_proc_body(ctx, e, d);
 			}, c, i);
 		}
-		
+
 		thread.pool_start(&c.task_pool);
 		thread.pool_wait_and_process(&c.task_pool);
 	}
